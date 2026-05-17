@@ -1,5 +1,5 @@
 const STORAGE_KEY = "power-exam-review-v1";
-const DATA_VERSION = "pdf-104-137-keywords-v6-clean";
+const DATA_VERSION = "pdf-104-137-keywords-v7-spacing";
 
 const seedQuestions = [
   {
@@ -267,6 +267,112 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function formatDisplayQuestion(question) {
+  let text = String(question || "")
+    .replace(/\s+/g, " ")
+    .replace(/([,;:])(?=\S)/g, "$1 ")
+    .replace(/([.!?])(?=[가-힣A-Za-z])/g, "$1 ")
+    .replace(/([가-힣])(\d+[.)])/g, "$1 $2")
+    .replace(/(\))(?=[가-힣A-Za-z0-9])/g, "$1 ")
+    .replace(/([가-힣])([A-Z]{2,}[A-Za-z0-9/-]*)/g, "$1 $2")
+    .replace(/([A-Za-z0-9])([가-힣])/g, "$1 $2");
+
+  const spacingTerms = [
+    ["또는", "또는"],
+    ["그리고", "그리고"],
+    ["다음", "다음"],
+    ["아래", "아래"],
+    ["대하여", "대하여"],
+    ["설명하시오", "설명하시오"],
+    ["구하시오", "구하시오"],
+    ["비교하여", "비교하여"],
+    ["나누어", "나누어"],
+    ["각각", "각각"],
+    ["제시하고", "제시하고"],
+    ["이간격", "이 간격"],
+    ["유지하기", "유지하기"],
+    ["설치된", "설치된"],
+    ["사용하는", "사용하는"],
+    ["적용하는", "적용하는"],
+    ["정정하는", "정정하는"],
+    ["발생하는", "발생하는"],
+    ["발생시", "발생 시"],
+    ["경우", "경우"],
+    ["다음사항", "다음 사항"],
+    ["다음물음", "다음 물음"],
+    ["장단점", "장단점"],
+    ["유의사항", "유의사항"],
+    ["고려사항", "고려사항"],
+    ["보호계전기", "보호계전기"],
+    ["과전류계전기", "과전류 계전기"],
+    ["과전류보호계전기", "과전류 보호계전기"],
+    ["비율차동계전기", "비율차동계전기"],
+    ["거리계전기", "거리계전기"],
+    ["보호계전방식", "보호계전방식"],
+    ["한시과전류", "한시 과전류"],
+    ["협조시간간격", "협조시간 간격"],
+    ["시간협조항목", "시간협조 항목"],
+    ["공장구내에", "공장구내에"],
+    ["가공송전선로", "가공송전선로"],
+    ["지중송전선로", "지중송전선로"],
+    ["배전계통", "배전계통"],
+    ["배전선로", "배전선로"],
+    ["전력계통", "전력계통"],
+    ["전력케이블", "전력케이블"],
+    ["해저케이블", "해저케이블"],
+    ["전력용변압기", "전력용 변압기"],
+    ["단권변압기", "단권변압기"],
+    ["3권선변압기", "3권선 변압기"],
+    ["동기발전기", "동기발전기"],
+    ["수차발전기", "수차발전기"],
+    ["터빈발전기", "터빈발전기"],
+    ["대용량발전기", "대용량 발전기"],
+    ["예방진단시스템", "예방진단 시스템"],
+    ["화력발전", "화력발전"],
+    ["수력발전", "수력발전"],
+    ["풍력발전", "풍력발전"],
+    ["태양광발전", "태양광발전"],
+    ["원자력발전", "원자력발전"],
+    ["무효전력", "무효전력"],
+    ["고장전류", "고장전류"],
+    ["전압강하", "전압강하"],
+    ["전압변동", "전압변동"],
+    ["주파수제어", "주파수제어"],
+    ["전력조류", "전력조류"],
+    ["조류계산", "조류계산"],
+    ["상태추정", "상태추정"],
+    ["경제급전", "경제급전"],
+    ["절연협조", "절연협조"],
+    ["중성점접지", "중성점 접지"],
+    ["중성선단선", "중성선 단선"],
+    ["허용전류", "허용전류"],
+    ["단락전류", "단락전류"],
+    ["차단기", "차단기"],
+    ["피뢰기", "피뢰기"],
+    ["개폐서지", "개폐서지"],
+    ["고조파", "고조파"],
+    ["분산전원", "분산전원"],
+    ["신재생에너지", "신재생에너지"]
+  ];
+
+  for (const [term, display] of spacingTerms) {
+    text = text.replaceAll(term, ` ${display} `);
+  }
+
+  return text
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/([,;:!?])(?=\S)/g, "$1 ")
+    .replace(/(\d)\.\s+(\d)/g, "$1.$2")
+    .replace(/kV\s*Cable/gi, "kV Cable")
+    .replace(/의구조/g, "의 구조")
+    .replace(/와특징/g, "와 특징")
+    .replace(/\s+(을|를|이|가|은|는|와|과|에|에서|의|로|으로|부터|까지|마다|별)(?=\s|$)/g, "$1")
+    .replace(/(을|를|이|가|은|는|에|에서|로|으로)(적용|사용|설명|정정|구하|비교|제시|유지|나타내|분류|설치|연결|접속|공급|운전|보호|검토|계산)/g, "$1 $2")
+    .replace(/,(\S)/g, ", $1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function getFilteredQuestions() {
   const keyword = elements.searchInput.value.trim().toLowerCase();
   const category = elements.categoryFilter.value;
@@ -331,7 +437,7 @@ function renderList() {
             <span class="frequency-chip ${frequency.levelKey}">${escapeHtml(frequency.label)}</span>
             <span>${item.starred ? "★" : ""}</span>
           </div>
-          <strong>${escapeHtml(item.question)}</strong>
+          <strong>${escapeHtml(formatDisplayQuestion(item.question))}</strong>
           <span class="status-pill ${item.status}">${statusLabel}</span>
         </button>
       `;
@@ -350,7 +456,7 @@ function renderDetail() {
 
   elements.detailRound.textContent = selected.round;
   elements.detailCategory.textContent = selected.category;
-  elements.detailQuestion.textContent = selected.question;
+  elements.detailQuestion.textContent = formatDisplayQuestion(selected.question);
   elements.starButton.textContent = selected.starred ? "★" : "☆";
   elements.memoInput.value = selected.memo || "";
   elements.reviewLog.innerHTML = selected.reviews.length
@@ -517,7 +623,7 @@ function renderSubjectView() {
                 <span>${escapeHtml(getQuestionKeyword(item))}</span>
                 <span class="frequency-chip ${frequency.levelKey}">${escapeHtml(frequency.label)}</span>
               </div>
-              <strong>${escapeHtml(item.question)}</strong>
+              <strong>${escapeHtml(formatDisplayQuestion(item.question))}</strong>
             </button>
           `;
         })
@@ -720,7 +826,7 @@ function renderRegisteredList() {
                 <span>${escapeHtml(item.category)}</span>
                 <span class="frequency-chip ${frequency.levelKey}">${escapeHtml(frequency.label)}</span>
               </div>
-              <strong>${escapeHtml(item.question)}</strong>
+              <strong>${escapeHtml(formatDisplayQuestion(item.question))}</strong>
             </button>
           `;
         })
