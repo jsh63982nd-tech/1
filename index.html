@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#17212d" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="기출회독" />
+    <title>발송배전기술사 기출회독</title>
+    <link rel="manifest" href="manifest.json" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">전</span>
+          <div>
+            <h1>발송배전기술사</h1>
+            <p>기출회독</p>
+          </div>
+        </div>
+
+        <nav class="nav">
+          <button type="button" class="nav-item active" data-view="study">회독</button>
+          <button type="button" class="nav-item" data-view="add">문제 등록</button>
+          <button type="button" class="nav-item" data-view="frequent">빈출문제</button>
+          <p class="nav-label">과목별</p>
+          <button type="button" class="nav-item" data-view="subject" data-subject="송배전공학">송배전공학</button>
+          <button type="button" class="nav-item" data-view="subject" data-subject="발전공학">발전공학</button>
+          <button type="button" class="nav-item" data-view="subject" data-subject="계통공학">계통공학</button>
+          <button type="button" class="nav-item" data-view="stats">통계</button>
+        </nav>
+
+        <div class="sidebar-panel">
+          <p class="panel-label">오늘 목표</p>
+          <div class="goal-row">
+            <button type="button" id="goalDown" aria-label="목표 줄이기">-</button>
+            <strong id="dailyGoal">20</strong>
+            <button type="button" id="goalUp" aria-label="목표 늘리기">+</button>
+          </div>
+          <div class="progress-line">
+            <span id="todayProgress"></span>
+          </div>
+          <p id="goalText" class="muted"></p>
+        </div>
+      </aside>
+
+      <main class="content">
+        <section class="toolbar">
+          <div class="search-wrap">
+            <input id="searchInput" type="search" placeholder="키워드, 회차, 분야 검색" />
+          </div>
+          <select id="categoryFilter" aria-label="분야 필터"></select>
+          <select id="statusFilter" aria-label="상태 필터">
+            <option value="all">전체</option>
+            <option value="unseen">미회독</option>
+            <option value="weak">취약</option>
+            <option value="done">완료</option>
+            <option value="starred">즐겨찾기</option>
+          </select>
+        </section>
+
+        <section id="studyView" class="view active">
+          <div class="study-grid">
+            <section class="question-list" aria-label="기출문제 목록">
+              <div class="list-head">
+                <div>
+                  <p class="eyebrow">문제 목록</p>
+                  <h2 id="listTitle">전체 기출</h2>
+                </div>
+                <span id="questionCount" class="count-badge"></span>
+              </div>
+              <div id="questionList" class="question-items"></div>
+            </section>
+
+            <section class="question-detail" aria-live="polite">
+              <div id="emptyDetail" class="empty-state">
+                <h2>문제를 선택하세요</h2>
+                <p>왼쪽 목록에서 문제를 고르면 회독 체크와 메모를 남길 수 있습니다.</p>
+              </div>
+
+              <article id="detailCard" class="detail-card hidden">
+                <div class="detail-meta">
+                  <span id="detailRound"></span>
+                  <span id="detailCategory"></span>
+                  <button type="button" id="starButton" class="icon-button" title="즐겨찾기">☆</button>
+                </div>
+                <h2 id="detailQuestion"></h2>
+
+                <div class="memo-block">
+                  <label for="memoInput">내 답안 틀</label>
+                  <textarea id="memoInput" rows="8" placeholder="목차, 핵심 키워드, 계산식, 암기 포인트를 적어두세요."></textarea>
+                </div>
+
+                <div class="actions">
+                  <button type="button" class="primary" id="markDone">회독 완료</button>
+                  <button type="button" id="markWeak">취약 표시</button>
+                  <button type="button" id="resetStatus">상태 초기화</button>
+                </div>
+
+                <div class="review-log">
+                  <p class="panel-label">회독 기록</p>
+                  <div id="reviewLog"></div>
+                </div>
+              </article>
+            </section>
+          </div>
+        </section>
+
+        <section id="addView" class="view">
+          <div class="form-layout">
+            <section class="form-panel">
+              <p class="eyebrow">직접 등록</p>
+              <h2>새 기출문제</h2>
+              <form id="questionForm">
+                <label>
+                  회차
+                  <input id="roundInput" required placeholder="예: 129회 1교시" />
+                </label>
+                <label>
+                  분야
+                  <input id="categoryInput" required placeholder="예: 송전, 배전, 보호계전" />
+                </label>
+                <label>
+                  문제
+                  <textarea id="questionInput" required rows="5" placeholder="문제 내용을 입력하세요."></textarea>
+                </label>
+                <button class="primary" type="submit">등록</button>
+              </form>
+              <div class="registered-panel">
+                <div class="registered-head">
+                  <p class="eyebrow">등록된 문제</p>
+                  <span id="registeredCount" class="count-badge">0문제</span>
+                </div>
+                <div id="registeredList" class="registered-list"></div>
+              </div>
+            </section>
+
+            <section class="form-panel">
+              <p class="eyebrow">CSV 가져오기</p>
+              <h2>여러 문제 한 번에 넣기</h2>
+              <p class="muted">CSV 파일을 선택하거나 아래 칸에 붙여넣으세요. 형식: 회차,분야,문제</p>
+              <label>
+                파일 선택
+                <input id="importFile" type="file" accept=".csv,.txt,.tsv,text/csv,text/plain" />
+              </label>
+              <textarea id="csvInput" rows="10" placeholder="128회 2교시,송전,가공송전선로의 코로나 현상에 대해 설명하시오."></textarea>
+              <div class="actions">
+                <button type="button" class="primary" id="importCsv">CSV 등록</button>
+                <button type="button" id="importExam121">전체 PDF 등록</button>
+                <button type="button" id="exportJson">백업 내보내기</button>
+                <button type="button" id="resetData">초기화</button>
+              </div>
+              <p id="importMessage" class="muted"></p>
+            </section>
+          </div>
+        </section>
+
+        <section id="frequentView" class="view">
+          <section class="category-chart frequent-board">
+            <div class="frequency-head">
+              <div>
+                <p class="eyebrow">빈출문제</p>
+                <h2>과목별 키워드 빈도</h2>
+              </div>
+              <select id="frequentSubjectFilter" aria-label="과목 필터"></select>
+            </div>
+            <div id="frequentKeywordList" class="frequent-list"></div>
+          </section>
+        </section>
+
+        <section id="subjectView" class="view">
+          <section class="category-chart subject-board">
+            <div class="frequency-head subject-head">
+              <div>
+                <p class="eyebrow">과목별 문제</p>
+                <h2 id="subjectTitle">송배전공학</h2>
+              </div>
+              <span id="subjectCount" class="count-badge"></span>
+            </div>
+            <div class="subject-layout">
+              <section class="subject-keyword-panel" aria-label="과목별 빈출문제">
+                <div class="subject-panel-head">
+                  <h3>빈출문제</h3>
+                  <span id="subjectKeywordCount" class="muted"></span>
+                </div>
+                <div id="subjectKeywordList" class="frequent-keywords"></div>
+              </section>
+              <section class="subject-question-panel" aria-label="과목별 문제 목록">
+                <div class="subject-panel-head">
+                  <h3 id="subjectQuestionTitle">전체 문제</h3>
+                </div>
+                <div id="subjectQuestionList" class="subject-question-list"></div>
+              </section>
+            </div>
+          </section>
+        </section>
+
+        <section id="statsView" class="view">
+          <div class="stats-grid">
+            <div class="stat">
+              <span>전체 문제</span>
+              <strong id="statTotal">0</strong>
+            </div>
+            <div class="stat">
+              <span>완료</span>
+              <strong id="statDone">0</strong>
+            </div>
+            <div class="stat">
+              <span>취약</span>
+              <strong id="statWeak">0</strong>
+            </div>
+            <div class="stat">
+              <span>오늘 회독</span>
+              <strong id="statToday">0</strong>
+            </div>
+          </div>
+          <section class="category-chart">
+            <p class="eyebrow">분야별 진행</p>
+            <div id="categoryStats"></div>
+          </section>
+          <section class="category-chart frequency-panel">
+            <div class="frequency-head">
+              <div>
+                <p class="eyebrow">출제빈도</p>
+                <h2>주제별 빈도 분류</h2>
+              </div>
+              <select id="frequencyFilter" aria-label="출제빈도 필터">
+                <option value="all">전체</option>
+                <option value="high">상</option>
+                <option value="medium">중</option>
+                <option value="low">하</option>
+              </select>
+            </div>
+            <div id="frequencyStats" class="frequency-list"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="bundled-questions.js?v=4"></script>
+    <script src="app.js?v=13"></script>
+  </body>
+</html>

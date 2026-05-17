@@ -1,0 +1,13 @@
+server.err.log
+server.out.log
+__pycache__/
+exam101_images/
+exam102_images/
+*.pdf
+debug_*.txt
+pdfjs_*.txt
+pdf_text_samples.txt
+older_pdf_samples.txt
+broad_keyword_samples.txt
+github-upload/
+github-upload.zip
