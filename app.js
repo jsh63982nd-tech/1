@@ -100,6 +100,7 @@ const state = loadState();
 let selectedId = state.questions[0]?.id ?? null;
 let activeSubject = subjectTabs[0].name;
 let activeSubjectKeyword = "all";
+let activeFrequentSubject = "";
 localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, dataVersion: DATA_VERSION }));
 
 const elements = {
@@ -148,7 +149,9 @@ const elements = {
   categoryStats: document.querySelector("#categoryStats"),
   frequencyFilter: document.querySelector("#frequencyFilter"),
   frequencyStats: document.querySelector("#frequencyStats"),
-  frequentSubjectFilter: document.querySelector("#frequentSubjectFilter"),
+  frequentTitle: document.querySelector("#frequentTitle"),
+  frequentBack: document.querySelector("#frequentBack"),
+  frequentSubjectCards: document.querySelector("#frequentSubjectCards"),
   frequentKeywordList: document.querySelector("#frequentKeywordList"),
   subjectTitle: document.querySelector("#subjectTitle"),
   subjectCount: document.querySelector("#subjectCount"),
@@ -416,17 +419,24 @@ function renderCategoryFilter() {
 }
 
 function renderFrequentSubjectFilter() {
-  if (!elements.frequentSubjectFilter) {
+  if (!elements.frequentSubjectCards) {
     return;
   }
 
-  const current = elements.frequentSubjectFilter.value || "all";
-  const categories = [...new Set(state.questions.map((item) => item.category))].sort();
-  elements.frequentSubjectFilter.innerHTML = [
-    `<option value="all">전체 과목</option>`,
-    ...categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`)
-  ].join("");
-  elements.frequentSubjectFilter.value = categories.includes(current) ? current : "all";
+  elements.frequentSubjectCards.innerHTML = subjectTabs
+    .map((subject) => {
+      const questions = getQuestionsForSubject(subject.name);
+      const keywords = buildSubjectKeywordRows(questions);
+      const topKeyword = keywords[0]?.keyword || "분석 대기";
+      return `
+        <button type="button" class="frequent-subject-card" data-subject="${escapeHtml(subject.name)}">
+          <span>${escapeHtml(subject.name)}</span>
+          <strong>${questions.length}문제</strong>
+          <p>대표 빈출: ${escapeHtml(topKeyword)}</p>
+        </button>
+      `;
+    })
+    .join("");
 }
 
 function renderList() {
@@ -577,42 +587,51 @@ function renderFrequencyStats() {
 }
 
 function renderFrequentProblems() {
-  if (!elements.frequentKeywordList) {
+  if (!elements.frequentKeywordList || !elements.frequentSubjectCards) {
     return;
   }
 
-  const selectedCategory = elements.frequentSubjectFilter?.value || "all";
-  const groups = buildFrequentKeywordGroups(selectedCategory);
+  if (!activeFrequentSubject) {
+    elements.frequentTitle.textContent = "과목을 선택하세요";
+    elements.frequentBack.classList.add("hidden");
+    elements.frequentSubjectCards.classList.remove("hidden");
+    elements.frequentKeywordList.classList.add("hidden");
+    return;
+  }
 
-  elements.frequentKeywordList.innerHTML = groups.length
-    ? groups
-        .map(
-          (group) => `
-            <section class="frequent-subject">
-              <div class="frequent-subject-head">
-                <h3>${escapeHtml(group.category)}</h3>
-                <span class="count-badge">${group.total}문제</span>
-              </div>
-              <div class="frequent-keywords">
-                ${group.keywords
-                  .map(
-                    (row, index) => `
-                      <button type="button" class="frequent-keyword" data-keyword="${escapeHtml(row.keyword)}" data-category="${escapeHtml(group.category)}">
-                        <span class="rank">${index + 1}</span>
-                        <div>
-                          <strong>${escapeHtml(row.keyword)}</strong>
-                          <p>${row.count}문제 · ${row.percent}%</p>
-                        </div>
-                        <span class="frequency-badge ${row.levelKey}">${row.level}</span>
-                      </button>
-                    `
-                  )
-                  .join("")}
-              </div>
-            </section>
-          `
-        )
-        .join("")
+  const subject = getSubjectDefinition(activeFrequentSubject);
+  const subjectQuestions = getQuestionsForSubject(subject.name);
+  const keywordRows = buildSubjectKeywordRows(subjectQuestions);
+
+  elements.frequentTitle.textContent = `${subject.name} 빈출문제`;
+  elements.frequentBack.classList.remove("hidden");
+  elements.frequentSubjectCards.classList.add("hidden");
+  elements.frequentKeywordList.classList.remove("hidden");
+  elements.frequentKeywordList.innerHTML = keywordRows.length
+    ? `
+      <section class="frequent-subject">
+        <div class="frequent-subject-head">
+          <h3>${escapeHtml(subject.name)}</h3>
+          <span class="count-badge">${subjectQuestions.length}문제</span>
+        </div>
+        <div class="frequent-keywords">
+          ${keywordRows
+            .map(
+              (row, index) => `
+                <button type="button" class="frequent-keyword" data-keyword="${escapeHtml(row.keyword)}" data-category="all">
+                  <span class="rank">${index + 1}</span>
+                  <div>
+                    <strong>${escapeHtml(row.keyword)}</strong>
+                    <p>${row.count}문제 · ${row.percent}%</p>
+                  </div>
+                  <span class="frequency-badge ${row.levelKey}">${row.level}</span>
+                </button>
+              `
+            )
+            .join("")}
+        </div>
+      </section>
+    `
     : `<p class="muted">표시할 빈출 키워드가 없습니다.</p>`;
 }
 
@@ -1214,7 +1233,19 @@ elements.searchInput.addEventListener("input", renderList);
 elements.categoryFilter.addEventListener("change", renderList);
 elements.statusFilter.addEventListener("change", renderList);
 elements.frequencyFilter.addEventListener("change", renderFrequencyStats);
-elements.frequentSubjectFilter.addEventListener("change", renderFrequentProblems);
+elements.frequentSubjectCards.addEventListener("click", (event) => {
+  const card = event.target.closest(".frequent-subject-card");
+  if (!card) {
+    return;
+  }
+  activeFrequentSubject = card.dataset.subject || "";
+  renderFrequentProblems();
+});
+
+elements.frequentBack.addEventListener("click", () => {
+  activeFrequentSubject = "";
+  renderFrequentProblems();
+});
 
 elements.startUnseen.addEventListener("click", () => openStudyWithStatus("unseen"));
 elements.startWeak.addEventListener("click", () => openStudyWithStatus("weak"));

@@ -235,11 +235,12 @@
           <section class="category-chart frequent-board">
             <div class="frequency-head">
               <div>
-                <p class="eyebrow">빈출문제</p>
-                <h2>과목별 키워드 빈도</h2>
+                <p class="eyebrow">과목별 빈출문제</p>
+                <h2 id="frequentTitle">과목을 선택하세요</h2>
               </div>
-              <select id="frequentSubjectFilter" aria-label="과목 필터"></select>
+              <button type="button" id="frequentBack" class="hidden">과목 선택</button>
             </div>
+            <div id="frequentSubjectCards" class="frequent-subject-cards"></div>
             <div id="frequentKeywordList" class="frequent-list"></div>
           </section>
         </section>
