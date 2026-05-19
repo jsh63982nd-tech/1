@@ -96,6 +96,45 @@ const subjectTabs = [
   }
 ];
 
+const bookOutlines = {
+  "송배전공학": {
+    source: "최신 송배전공학 목차",
+    chapters: [
+      "송배전 계통의 구성", "가공 송전 선로", "지중 송전 선로", "선로 정수와 코로나",
+      "송전 특성", "중성점 접지 방식과 유도 장해", "고장 계산", "안정도",
+      "이상 전압", "보호 계전 방식", "변전소", "배전 계통의 구성",
+      "배전 선로의 전기적 특성", "배전 선로의 관리와 보호"
+    ],
+    keywords: [
+      "송전방식", "직류송전", "교류송전", "송전전압", "표준전압", "가공전선로", "전선종류", "허용전류",
+      "이도", "애자", "지지물", "철탑", "지중송전", "전력케이블", "XLPE", "OF케이블", "전선로정수",
+      "저항", "인덕턴스", "정전용량", "송전계통임피던스", "코로나", "송전용량", "페란티", "동기조상기",
+      "전력용콘덴서", "중성점접지", "소호리액터", "유도장해", "고장계산", "대칭좌표", "안정도",
+      "이상전압", "피뢰기", "절연협조", "보호계전", "변전소", "고압배전", "저압배전", "전압조정",
+      "역률개선", "배전손실", "배전보호", "감전방지"
+    ]
+  },
+  "발전공학": {
+    source: "최신 발전공학 목차",
+    chapters: [
+      "에너지 자원과 전력", "수력발전의 개요", "수력학", "유량과 낙차", "수력설비", "수차",
+      "기력 발전의 개요", "열역학", "보일러 및 연소장치", "증기터빈", "기타의 화력발전",
+      "원자력 발전의 개요", "원자로 이론", "발전용 원자로", "핵연료 및 핵연료 주기",
+      "원자력 발전의 안전성", "새로운 발전", "에너지 저장기술"
+    ],
+    keywords: [
+      "에너지자원", "발전방식", "부하특성", "발전소운용", "수력발전", "낙차", "유량", "수력설비",
+      "댐", "수로", "수조", "수압관로", "수차", "흡출관", "조속기", "양수발전", "기력발전",
+      "열사이클", "랭킨", "열역학", "엔트로피", "보일러", "연소", "화로", "과열기", "절탄기",
+      "공기예열기", "통풍장치", "집진장치", "급수처리", "증기터빈", "열병합발전", "복수설비",
+      "디젤기관발전", "가스터빈", "복합사이클", "원자력", "원자로", "핵분열", "감속재",
+      "냉각재", "핵연료", "안전성", "MHD", "석탄가스화", "태양발전", "풍력발전", "해양에너지",
+      "지열발전", "연료전지", "핵융합", "에너지저장", "양수저장", "압축공기저장", "전기에너지저장",
+      "초전도저장"
+    ]
+  }
+};
+
 const state = loadState();
 let selectedId = state.questions[0]?.id ?? null;
 let activeSubject = subjectTabs[0].name;
@@ -428,10 +467,15 @@ function renderFrequentSubjectFilter() {
       const questions = getQuestionsForSubject(subject.name);
       const keywords = buildSubjectKeywordRows(questions);
       const topKeyword = keywords[0]?.keyword || "분석 대기";
+      const outline = getBookOutline(subject.name);
+      const chapterSummary = outline
+        ? `${outline.chapters.length}개 교재 단원 반영`
+        : "기출 키워드 기준";
       return `
         <button type="button" class="frequent-subject-card" data-subject="${escapeHtml(subject.name)}">
           <span>${escapeHtml(subject.name)}</span>
           <strong>${questions.length}문제</strong>
+          <p>${escapeHtml(chapterSummary)}</p>
           <p>대표 빈출: ${escapeHtml(topKeyword)}</p>
         </button>
       `;
@@ -600,6 +644,7 @@ function renderFrequentProblems() {
   }
 
   const subject = getSubjectDefinition(activeFrequentSubject);
+  const outline = getBookOutline(subject.name);
   const subjectQuestions = getQuestionsForSubject(subject.name);
   const keywordRows = buildSubjectKeywordRows(subjectQuestions);
 
@@ -609,6 +654,17 @@ function renderFrequentProblems() {
   elements.frequentKeywordList.classList.remove("hidden");
   elements.frequentKeywordList.innerHTML = keywordRows.length
     ? `
+      ${outline ? `
+        <section class="book-outline">
+          <div>
+            <p class="eyebrow">${escapeHtml(outline.source)}</p>
+            <h3>교재 단원 기준</h3>
+          </div>
+          <div class="book-chapters">
+            ${outline.chapters.map((chapter) => `<span>${escapeHtml(chapter)}</span>`).join("")}
+          </div>
+        </section>
+      ` : ""}
       <section class="frequent-subject">
         <div class="frequent-subject-head">
           <h3>${escapeHtml(subject.name)}</h3>
@@ -724,6 +780,10 @@ function getSubjectDefinition(name) {
   return subjectTabs.find((subject) => subject.name === name) || subjectTabs[0];
 }
 
+function getBookOutline(subjectName) {
+  return bookOutlines[subjectName] || null;
+}
+
 function getQuestionsForSubject(subjectName) {
   const subject = getSubjectDefinition(subjectName);
   const matched = state.questions.filter((item) => questionMatchesSubject(item, subject));
@@ -737,7 +797,10 @@ function questionMatchesSubject(item, subject) {
     return false;
   }
 
-  return subject.keywords.some((keyword) => keywordText.includes(normalizeForFrequency(keyword)));
+  const outline = getBookOutline(subject.name);
+  const outlineKeywords = outline ? [...outline.chapters, ...outline.keywords] : [];
+  const keywords = [...subject.keywords, ...outlineKeywords];
+  return keywords.some((keyword) => keywordText.includes(normalizeForFrequency(keyword)));
 }
 
 function buildSubjectKeywordRows(questions) {
