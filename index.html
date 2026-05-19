@@ -22,7 +22,8 @@
         </div>
 
         <nav class="nav">
-          <button type="button" class="nav-item active" data-view="study">회독</button>
+          <button type="button" class="nav-item active" data-view="home">홈</button>
+          <button type="button" class="nav-item" data-view="study">문제풀이</button>
           <button type="button" class="nav-item" data-view="add">문제 등록</button>
           <button type="button" class="nav-item" data-view="frequent">빈출문제</button>
           <button type="button" class="nav-item" data-view="stats">통계</button>
@@ -47,7 +48,7 @@
       </aside>
 
       <main class="content">
-        <section class="toolbar">
+        <section id="toolbar" class="toolbar hidden">
           <div class="search-wrap">
             <input id="searchInput" type="search" placeholder="키워드, 회차, 분야 검색" />
           </div>
@@ -61,7 +62,80 @@
           </select>
         </section>
 
-        <section id="studyView" class="view active">
+        <section id="homeView" class="view active">
+          <section class="home-hero">
+            <div class="home-copy">
+              <p class="eyebrow">발송배전기술사 기출회독</p>
+              <h2>오늘 풀 문제를 고르고, 취약한 주제를 반복하세요.</h2>
+              <p>전체 기출을 회차별로 훑기보다 미회독, 취약, 빈출 키워드 중심으로 회독 흐름을 잡는 앱입니다.</p>
+              <div class="home-actions">
+                <button type="button" class="primary" id="startUnseen">미회독 시작</button>
+                <button type="button" id="startWeak">취약 문제 보기</button>
+                <button type="button" id="openFrequent">빈출 키워드</button>
+              </div>
+            </div>
+            <div class="today-card">
+              <p class="panel-label">오늘 진행</p>
+              <strong id="homeTodayCount">0</strong>
+              <span id="homeTodayGoal">/20문제</span>
+              <div class="progress-line home-progress">
+                <span id="homeTodayProgress"></span>
+              </div>
+            </div>
+          </section>
+
+          <section class="dashboard-grid">
+            <article class="dash-card">
+              <span>전체 문제</span>
+              <strong id="homeTotal">0</strong>
+              <p>저장된 기출 데이터 기준</p>
+            </article>
+            <article class="dash-card">
+              <span>미회독</span>
+              <strong id="homeUnseen">0</strong>
+              <p>우선 처리할 문제</p>
+            </article>
+            <article class="dash-card">
+              <span>취약</span>
+              <strong id="homeWeak">0</strong>
+              <p>반복 회독 대상</p>
+            </article>
+            <article class="dash-card">
+              <span>완료율</span>
+              <strong id="homeDoneRate">0%</strong>
+              <p>전체 대비 완료 비율</p>
+            </article>
+          </section>
+
+          <section class="home-layout">
+            <article class="home-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">다음 문제</p>
+                  <h3>바로 이어서 풀기</h3>
+                </div>
+                <button type="button" id="resumeStudy">열기</button>
+              </div>
+              <div id="nextQuestionPreview" class="next-preview"></div>
+            </article>
+
+            <article class="home-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">회독 전략</p>
+                  <h3>추천 순서</h3>
+                </div>
+              </div>
+              <div class="strategy-list">
+                <button type="button" data-home-filter="unseen">1. 미회독 문제 먼저 정리</button>
+                <button type="button" data-home-filter="weak">2. 취약 표시 문제 반복</button>
+                <button type="button" data-home-filter="starred">3. 즐겨찾기 문제 암기</button>
+              </div>
+            </article>
+          </section>
+        </section>
+
+        <section id="studyView" class="view">
           <div class="study-grid">
             <section class="question-list" aria-label="기출문제 목록">
               <div class="list-head">

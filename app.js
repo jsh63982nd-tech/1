@@ -105,6 +105,7 @@ localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, dataVersion: DATA_V
 const elements = {
   navItems: document.querySelectorAll(".nav-item"),
   views: document.querySelectorAll(".view"),
+  toolbar: document.querySelector("#toolbar"),
   searchInput: document.querySelector("#searchInput"),
   categoryFilter: document.querySelector("#categoryFilter"),
   statusFilter: document.querySelector("#statusFilter"),
@@ -154,7 +155,20 @@ const elements = {
   subjectKeywordCount: document.querySelector("#subjectKeywordCount"),
   subjectKeywordList: document.querySelector("#subjectKeywordList"),
   subjectQuestionTitle: document.querySelector("#subjectQuestionTitle"),
-  subjectQuestionList: document.querySelector("#subjectQuestionList")
+  subjectQuestionList: document.querySelector("#subjectQuestionList"),
+  homeTodayCount: document.querySelector("#homeTodayCount"),
+  homeTodayGoal: document.querySelector("#homeTodayGoal"),
+  homeTodayProgress: document.querySelector("#homeTodayProgress"),
+  homeTotal: document.querySelector("#homeTotal"),
+  homeUnseen: document.querySelector("#homeUnseen"),
+  homeWeak: document.querySelector("#homeWeak"),
+  homeDoneRate: document.querySelector("#homeDoneRate"),
+  nextQuestionPreview: document.querySelector("#nextQuestionPreview"),
+  startUnseen: document.querySelector("#startUnseen"),
+  startWeak: document.querySelector("#startWeak"),
+  openFrequent: document.querySelector("#openFrequent"),
+  resumeStudy: document.querySelector("#resumeStudy"),
+  strategyList: document.querySelector(".strategy-list")
 };
 
 function loadState() {
@@ -466,6 +480,36 @@ function renderDetail() {
         .map((review) => `<div class="log-item">${formatDateTime(review.date)} · ${review.label}</div>`)
         .join("")
     : `<p class="muted">아직 회독 기록이 없습니다.</p>`;
+}
+
+function renderHome() {
+  const total = state.questions.length;
+  const done = state.questions.filter((item) => item.status === "done").length;
+  const weak = state.questions.filter((item) => item.status === "weak").length;
+  const unseen = state.questions.filter((item) => item.status === "unseen").length;
+  const today = countTodayReviews();
+  const progress = Math.min(100, Math.round((today / state.dailyGoal) * 100));
+  const next = state.questions.find((item) => item.status === "unseen")
+    || state.questions.find((item) => item.status === "weak")
+    || state.questions[0];
+
+  elements.homeTodayCount.textContent = today;
+  elements.homeTodayGoal.textContent = `/${state.dailyGoal}문제`;
+  elements.homeTodayProgress.style.width = `${progress}%`;
+  elements.homeTotal.textContent = total;
+  elements.homeUnseen.textContent = unseen;
+  elements.homeWeak.textContent = weak;
+  elements.homeDoneRate.textContent = total ? `${Math.round((done / total) * 100)}%` : "0%";
+
+  elements.nextQuestionPreview.innerHTML = next
+    ? `
+      <div class="item-meta">
+        <span>${escapeHtml(next.round)}</span>
+        <span>${escapeHtml(next.category)}</span>
+      </div>
+      <strong>${escapeHtml(formatDisplayQuestion(next.question))}</strong>
+    `
+    : `<p class="muted">등록된 문제가 없습니다.</p>`;
 }
 
 function renderStats() {
@@ -844,6 +888,7 @@ function countTodayReviews() {
 function renderAll() {
   renderCategoryFilter();
   renderFrequentSubjectFilter();
+  renderHome();
   renderList();
   renderDetail();
   renderStats();
@@ -1111,6 +1156,25 @@ function activateView(viewName, activeNavItem = null) {
     nav.classList.toggle("active", isActive);
   });
   elements.views.forEach((view) => view.classList.toggle("active", view.id === `${viewName}View`));
+  elements.toolbar.classList.toggle("hidden", viewName !== "study");
+}
+
+function openStudyWithStatus(status) {
+  elements.searchInput.value = "";
+  elements.categoryFilter.value = "all";
+  elements.statusFilter.value = status;
+  const next = state.questions.find((item) => {
+    if (status === "starred") {
+      return item.starred;
+    }
+    return status === "all" ? true : item.status === status;
+  });
+  if (next) {
+    selectedId = next.id;
+  }
+  activateView("study");
+  renderList();
+  renderDetail();
 }
 
 elements.navItems.forEach((item) => {
@@ -1151,6 +1215,18 @@ elements.categoryFilter.addEventListener("change", renderList);
 elements.statusFilter.addEventListener("change", renderList);
 elements.frequencyFilter.addEventListener("change", renderFrequencyStats);
 elements.frequentSubjectFilter.addEventListener("change", renderFrequentProblems);
+
+elements.startUnseen.addEventListener("click", () => openStudyWithStatus("unseen"));
+elements.startWeak.addEventListener("click", () => openStudyWithStatus("weak"));
+elements.resumeStudy.addEventListener("click", () => openStudyWithStatus("all"));
+elements.openFrequent.addEventListener("click", () => activateView("frequent"));
+elements.strategyList.addEventListener("click", (event) => {
+  const item = event.target.closest("[data-home-filter]");
+  if (!item) {
+    return;
+  }
+  openStudyWithStatus(item.dataset.homeFilter);
+});
 
 elements.frequencyStats.addEventListener("click", (event) => {
   const item = event.target.closest(".frequency-item");
