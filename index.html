@@ -231,10 +231,15 @@
                 <input id="importFile" type="file" accept=".csv,.txt,.tsv,text/csv,text/plain" />
               </label>
               <textarea id="csvInput" rows="10" placeholder="128회 2교시,송전,가공송전선로의 코로나 현상에 대해 설명하시오."></textarea>
+              <label>
+                백업 파일 선택
+                <input id="restoreJsonFile" type="file" accept=".json,application/json" />
+              </label>
               <div class="actions">
                 <button type="button" class="primary" id="importCsv">CSV 등록</button>
                 <button type="button" id="importExam121">전체 PDF 등록</button>
                 <button type="button" id="exportJson">백업 내보내기</button>
+                <button type="button" id="restoreJson">백업 가져오기</button>
                 <button type="button" id="resetData">초기화</button>
               </div>
               <p id="importMessage" class="muted"></p>
@@ -327,5 +332,7 @@
 
     <script src="bundled-questions.js?v=4"></script>
     <script src="app.js?v=14"></script>
+    <script src="question-cleanup.js?v=1"></script>
+    <script src="backup-restore.js?v=1"></script>
   </body>
 </html>
