@@ -139,7 +139,10 @@ const bookOutlines = {
       "전력원선도", "동기기", "여자기", "AVR", "유도발전기", "병렬콘덴서", "분로리액터",
       "고다상송전", "HVDC", "중성점잔류전압", "통신선유도전압", "GIS변전소", "SCADA",
       "ABC케이블", "시스유기전압", "케이블접속", "지중선로사고탐색", "방식", "순간전압강하",
-      "UPS", "무정전공법", "배전자동화", "배전선로뇌보호", "IEC접지"
+      "UPS", "무정전공법", "배전자동화", "배전선로뇌보호", "IEC접지", "선로정수",
+      "수전단", "송전단", "대지정전용량", "충전전류", "충전용량", "정태안정도", "과도안정도",
+      "무한대모선", "대칭분", "영상분", "정상분", "역상분", "방향계전", "거리계전", "차동계전",
+      "배전네트워크", "옥내배선", "저압뱅킹", "배전전압승압"
     ]
   },
   "발전공학": {
@@ -201,6 +204,7 @@ const elements = {
   detailRound: document.querySelector("#detailRound"),
   detailCategory: document.querySelector("#detailCategory"),
   detailQuestion: document.querySelector("#detailQuestion"),
+  studyAid: document.querySelector("#studyAid"),
   starButton: document.querySelector("#starButton"),
   memoInput: document.querySelector("#memoInput"),
   markDone: document.querySelector("#markDone"),
@@ -569,6 +573,7 @@ function renderDetail() {
   elements.detailRound.textContent = selected.round;
   elements.detailCategory.textContent = selected.category;
   elements.detailQuestion.textContent = formatDisplayQuestion(selected.question);
+  renderStudyAid(selected);
   elements.starButton.textContent = selected.starred ? "★" : "☆";
   elements.memoInput.value = selected.memo || "";
   elements.reviewLog.innerHTML = selected.reviews.length
@@ -578,6 +583,113 @@ function renderDetail() {
         .map((review) => `<div class="log-item">${formatDateTime(review.date)} · ${review.label}</div>`)
         .join("")
     : `<p class="muted">아직 회독 기록이 없습니다.</p>`;
+}
+
+function renderStudyAid(item) {
+  if (!elements.studyAid) {
+    return;
+  }
+
+  const aid = buildStudyAid(item);
+  elements.studyAid.innerHTML = `
+    <div class="study-aid-head">
+      <p class="eyebrow">교재 기반 정리</p>
+      <span>${aid.source}</span>
+    </div>
+    <div class="aid-block">
+      <strong>관련 단원</strong>
+      <div class="aid-chips">
+        ${aid.chapters.map((chapter) => `<span>${escapeHtml(chapter)}</span>`).join("")}
+      </div>
+    </div>
+    <div class="aid-block">
+      <strong>추천 키워드</strong>
+      <div class="aid-chips">
+        ${aid.keywords.map((keyword) => `<span>${escapeHtml(keyword)}</span>`).join("")}
+      </div>
+    </div>
+    <div class="aid-block">
+      <strong>답안 틀</strong>
+      <ol>${aid.outline.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>
+    </div>
+  `;
+}
+
+function buildStudyAid(item) {
+  const question = formatDisplayQuestion(item.question);
+  const compactQuestion = normalizeForFrequency(question);
+  const subject = subjectTabs
+    .map((candidate) => {
+      const outline = getBookOutline(candidate.name);
+      const keywords = [...candidate.keywords, ...(outline?.keywords || []), ...(outline?.chapters || [])];
+      const score = keywords.reduce((sum, keyword) => {
+        return sum + (compactQuestion.includes(normalizeForFrequency(keyword)) ? 1 : 0);
+      }, 0);
+      return { candidate, outline, score };
+    })
+    .sort((a, b) => b.score - a.score)[0];
+
+  const outline = subject.outline || getBookOutline("송배전공학");
+  const extracted = extractKeywords(question);
+  const rankedChapters = (outline?.chapters || [])
+    .map((chapter) => ({
+      chapter,
+      score: scoreChapterMatch(chapter, extracted, compactQuestion)
+    }))
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((row) => row.chapter)
+    .slice(0, 3);
+
+  const recommended = [...new Set([
+    ...extracted,
+    ...(outline?.keywords || []).filter((keyword) => compactQuestion.includes(normalizeForFrequency(keyword)))
+  ])].slice(0, 8);
+
+  return {
+    source: outline?.source || "기출 키워드",
+    chapters: rankedChapters.length ? rankedChapters : (outline?.chapters || []).slice(0, 3),
+    keywords: recommended.length ? recommended : extracted.slice(0, 6),
+    outline: buildAnswerOutline(question),
+  };
+}
+
+function scoreChapterMatch(chapter, keywords, compactQuestion) {
+  const compactChapter = normalizeForFrequency(chapter);
+  const chapterParts = chapter.split(/\s+/).filter((part) => part.length >= 2);
+  let score = compactQuestion.includes(compactChapter) ? 6 : 0;
+
+  keywords.forEach((keyword) => {
+    const compactKeyword = normalizeForFrequency(keyword);
+    if (compactChapter.includes(compactKeyword) || compactQuestion.includes(compactKeyword)) {
+      score += 2;
+    }
+  });
+
+  chapterParts.forEach((part) => {
+    if (compactQuestion.includes(normalizeForFrequency(part))) {
+      score += 1;
+    }
+  });
+
+  return score;
+}
+
+function buildAnswerOutline(question) {
+  const text = normalizeForFrequency(question);
+  if (text.includes("비교")) {
+    return ["비교 대상 정의", "구성/동작 원리", "장단점 비교", "적용 조건", "실무상 유의사항"];
+  }
+  if (text.includes("계산") || text.includes("구하")) {
+    return ["조건 정리", "등가회로/기준값 설정", "계산식 전개", "결과 해석", "검토사항"];
+  }
+  if (text.includes("대책") || text.includes("방지") || text.includes("보호")) {
+    return ["현상 정의", "발생 원인", "계통/설비 영향", "보호 및 저감 대책", "설계/운영 유의사항"];
+  }
+  if (text.includes("종류") || text.includes("분류")) {
+    return ["분류 기준", "각 방식의 원리", "특징 및 장단점", "적용 분야", "선정 시 고려사항"];
+  }
+  return ["정의", "원리 또는 구성", "주요 특징", "계통 영향", "적용 및 유의사항"];
 }
 
 function renderHome() {
