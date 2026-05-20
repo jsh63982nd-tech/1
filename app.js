@@ -487,13 +487,22 @@ function formatDisplayQuestion(question) {
 }
 
 function getFilteredQuestions() {
-  const keyword = elements.searchInput.value.trim().toLowerCase();
+  const keyword = elements.searchInput.value.trim();
+  const keywordTokens = keyword
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  const compactKeyword = normalizeForSearch(keyword);
   const category = elements.categoryFilter.value;
   const status = elements.statusFilter.value;
 
   return state.questions.filter((item) => {
-    const searchable = `${item.round} ${item.category} ${item.keyword || ""} ${item.question}`.toLowerCase();
-    const keywordMatch = !keyword || searchable.includes(keyword);
+    const searchable = buildSearchText(item);
+    const compactSearchable = normalizeForSearch(searchable);
+    const keywordMatch =
+      !keyword ||
+      keywordTokens.every((token) => searchable.includes(token) || compactSearchable.includes(normalizeForSearch(token))) ||
+      compactSearchable.includes(compactKeyword);
     const categoryMatch = category === "all" || item.category === category;
     const statusMatch =
       status === "all" ||
@@ -502,6 +511,26 @@ function getFilteredQuestions() {
 
     return keywordMatch && categoryMatch && statusMatch;
   });
+}
+
+function buildSearchText(item) {
+  return [
+    item.round,
+    item.category,
+    item.keyword || "",
+    item.question,
+    formatDisplayQuestion(item.question),
+    ...extractKeywords(item.question)
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function normalizeForSearch(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[()[\]{}<>「」『』“”"'.,:;!?·/_\-]/g, "")
+    .replace(/\s+/g, "");
 }
 
 function renderCategoryFilter() {
@@ -544,6 +573,10 @@ function renderList() {
   const filtered = getFilteredQuestions();
   elements.questionCount.textContent = `${filtered.length}문제`;
   elements.listTitle.textContent = elements.categoryFilter.value === "all" ? "전체 기출" : elements.categoryFilter.value;
+  if (filtered.length && !filtered.some((item) => item.id === selectedId)) {
+    selectedId = filtered[0].id;
+    renderDetail();
+  }
 
   if (!filtered.length) {
     elements.questionList.innerHTML = `<div class="empty-state"><p>조건에 맞는 문제가 없습니다.</p></div>`;
