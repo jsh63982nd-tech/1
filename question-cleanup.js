@@ -249,5 +249,46 @@
     return extractCleanKeywords(item.question)[0] || "기타";
   };
 
-  renderAll();
+  function activeViewName() {
+    const activeView = [...elements.views].find((view) => view.classList.contains("active"));
+    return activeView?.id.replace(/View$/, "") || "home";
+  }
+
+  function renderVisibleView(viewName = activeViewName()) {
+    if (viewName === "study") {
+      renderList();
+      renderDetail();
+      return;
+    }
+    if (viewName === "add") {
+      renderRegisteredList();
+      return;
+    }
+    if (viewName === "frequent") {
+      renderFrequentProblems();
+      return;
+    }
+    if (viewName === "subject") {
+      renderSubjectView();
+      return;
+    }
+    if (viewName === "stats") {
+      renderStats();
+      return;
+    }
+    renderHome();
+  }
+
+  const originalActivateView = activateView;
+  renderAll = () => {
+    renderCategoryFilter();
+    renderFrequentSubjectFilter();
+    renderVisibleView();
+  };
+  activateView = (viewName, activeNavItem = null) => {
+    originalActivateView(viewName, activeNavItem);
+    renderVisibleView(viewName);
+  };
+
+  window.questionCleanupReady = true;
 })();
