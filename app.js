@@ -1,6 +1,40 @@
 const STORAGE_KEY = "power-exam-review-v1";
 const DATA_VERSION = "pdf-104-137-keywords-v7-spacing";
 
+const keywordCorrections = new Map([
+  ["q-104-1-3", "SPS"],
+  ["q-107-4-6", "고압케이블열화진단"],
+  ["q-108-1-2", "직류조류계산"],
+  ["q-108-2-1", "발전기단락전류"],
+  ["q-108-3-1", "피뢰설비"],
+  ["q-108-3-5", "해상풍력제어"],
+  ["q-110-1-2", "발전기병렬운전조건"],
+  ["q-112-2-4", "지중케이블냉각방식"],
+  ["q-113-4-1", "화력발전연료비특성"],
+  ["q-114-1-5", "SPS"],
+  ["q-115-1-5", "태양광인버터"],
+  ["q-115-4-1", "발전기병렬운전조건"],
+  ["q-118-1-5", "지중케이블냉각방식"],
+  ["q-118-2-1", "발전기병렬운전조건"],
+  ["q-120-1-11", "태양광인버터"],
+  ["q-121-1-8", "SPS"],
+  ["q-121-1-13", "PSS"],
+  ["q-122-1-6", "직류조류계산"],
+  ["q-123-4-1", "고압케이블열화진단"],
+  ["q-128-1-3", "태양광인버터"],
+  ["q-129-1-10", "PSS"],
+  ["q-137-4-2", "태양광인버터"]
+]);
+
+const keywordAliases = new Map([
+  ["고장파급방지장치", "SPS"],
+  ["전력계통안정화장치", "PSS"],
+  ["태양광인버터효율", "태양광인버터"],
+  ["배전케이블", "고압케이블열화진단"],
+  ["변압기냉각방식", "지중케이블냉각방식"],
+  ["변압기병렬운전조건", "발전기병렬운전조건"]
+]);
+
 const seedQuestions = [
   {
     id: crypto.randomUUID(),
@@ -819,7 +853,7 @@ function getRecommendedQuestions() {
       } else if (item.status === "unseen") {
         reasonParts.push("미회독");
       }
-      reasonParts.push(`${primaryKeyword} ${keywordFrequency}회`);
+      reasonParts.push(`${primaryKeyword} ${keywordFrequency}문제`);
       if (textbookHits) {
         reasonParts.push(`교재 키워드 ${textbookHits}개 일치`);
       }
@@ -1129,12 +1163,12 @@ function getQuestionKeywordFrequency(item) {
   const count = keywordCounts.get(keyword) || 1;
 
   if (!keyword) {
-    return { label: "키워드 하 · 1회", levelKey: "low" };
+    return { label: "키워드 하 · 1문제", levelKey: "low" };
   }
 
   const levelKey = count >= 30 ? "high" : count >= 15 ? "medium" : "low";
   const level = levelKey === "high" ? "상" : levelKey === "medium" ? "중" : "하";
-  return { label: `${keyword} ${level} · ${count}회`, levelKey };
+  return { label: `${keyword} ${level} · ${count}문제`, levelKey };
 }
 
 function getKeywordCounts() {
@@ -1147,7 +1181,12 @@ function getKeywordCounts() {
 }
 
 function getQuestionKeyword(item) {
-  return item.keyword || extractKeywords(item.question)[0] || "기타";
+  const rawKeyword = keywordCorrections.get(item.id) || item.keyword || extractKeywords(item.question)[0] || "기타";
+  return normalizeQuestionKeyword(rawKeyword);
+}
+
+function normalizeQuestionKeyword(keyword) {
+  return keywordAliases.get(keyword) || keyword;
 }
 
 function extractKeywords(question) {
