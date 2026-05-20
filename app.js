@@ -267,6 +267,7 @@ const elements = {
   startWeak: document.querySelector("#startWeak"),
   openFrequent: document.querySelector("#openFrequent"),
   resumeStudy: document.querySelector("#resumeStudy"),
+  recommendedQuestions: document.querySelector("#recommendedQuestions"),
   strategyList: document.querySelector(".strategy-list")
 };
 
@@ -762,6 +763,77 @@ function renderHome() {
       <strong>${escapeHtml(formatDisplayQuestion(next.question))}</strong>
     `
     : `<p class="muted">등록된 문제가 없습니다.</p>`;
+  renderRecommendedQuestions();
+}
+
+function renderRecommendedQuestions() {
+  if (!elements.recommendedQuestions) {
+    return;
+  }
+
+  const recommendations = getRecommendedQuestions();
+  elements.recommendedQuestions.innerHTML = recommendations.length
+    ? recommendations
+        .map(
+          (row) => `
+            <button type="button" class="recommended-item" data-id="${row.item.id}">
+              <div class="item-meta">
+                <span>${escapeHtml(row.item.round)}</span>
+                <span>${escapeHtml(row.primaryKeyword)}</span>
+                <span class="frequency-chip ${row.frequency.levelKey}">${escapeHtml(row.frequency.label)}</span>
+              </div>
+              <strong>${escapeHtml(formatDisplayQuestion(row.item.question))}</strong>
+              <p>${escapeHtml(row.reason)}</p>
+            </button>
+          `
+        )
+        .join("")
+    : `<p class="muted">추천할 송배전공학 문제가 없습니다.</p>`;
+}
+
+function getRecommendedQuestions() {
+  const today = todayKey();
+  const subjectQuestions = getQuestionsForSubject("송배전공학");
+  const outline = getBookOutline("송배전공학");
+  const outlineKeywords = [...(outline?.chapters || []), ...(outline?.keywords || [])];
+  const keywordCounts = getKeywordCounts();
+
+  return subjectQuestions
+    .filter((item) => !item.reviews.some((review) => review.date.slice(0, 10) === today))
+    .map((item) => {
+      const questionText = formatDisplayQuestion(item.question);
+      const compactQuestion = normalizeForFrequency(questionText);
+      const extracted = extractKeywords(item.question);
+      const primaryKeyword = getQuestionKeyword(item);
+      const keywordFrequency = keywordCounts.get(primaryKeyword) || 1;
+      const textbookHits = outlineKeywords.filter((keyword) => compactQuestion.includes(normalizeForFrequency(keyword))).length;
+      const weakScore = item.status === "weak" ? 35 : 0;
+      const unseenScore = item.status === "unseen" ? 24 : 0;
+      const starredScore = item.starred ? 5 : 0;
+      const frequencyScore = Math.min(28, keywordFrequency * 2);
+      const textbookScore = Math.min(24, textbookHits * 4);
+      const score = weakScore + unseenScore + starredScore + frequencyScore + textbookScore;
+      const reasonParts = [];
+      if (item.status === "weak") {
+        reasonParts.push("취약 표시");
+      } else if (item.status === "unseen") {
+        reasonParts.push("미회독");
+      }
+      reasonParts.push(`${primaryKeyword} ${keywordFrequency}회`);
+      if (textbookHits) {
+        reasonParts.push(`교재 키워드 ${textbookHits}개 일치`);
+      }
+      return {
+        item,
+        score,
+        primaryKeyword,
+        frequency: getQuestionKeywordFrequency(item),
+        reason: reasonParts.join(" · "),
+        extracted
+      };
+    })
+    .sort((a, b) => b.score - a.score || b.extracted.length - a.extracted.length || a.item.round.localeCompare(b.item.round, "ko"))
+    .slice(0, 2);
 }
 
 function renderStats() {
@@ -1485,6 +1557,20 @@ elements.registeredList.addEventListener("click", (event) => {
   }
 
   selectedId = item.dataset.id;
+  activateView("study");
+  renderList();
+  renderDetail();
+});
+
+elements.recommendedQuestions.addEventListener("click", (event) => {
+  const item = event.target.closest(".recommended-item");
+  if (!item) {
+    return;
+  }
+  selectedId = item.dataset.id;
+  elements.searchInput.value = "";
+  elements.categoryFilter.value = "all";
+  elements.statusFilter.value = "all";
   activateView("study");
   renderList();
   renderDetail();

@@ -278,7 +278,7 @@ select {
 
 .home-layout {
   display: grid;
-  grid-template-columns: 1.2fr 0.8fr;
+  grid-template-columns: 1.15fr 1fr 0.85fr;
   gap: 18px;
 }
 
@@ -324,6 +324,39 @@ select {
   width: 100%;
   justify-content: flex-start;
   text-align: left;
+}
+
+.recommended-list {
+  display: grid;
+  gap: 10px;
+}
+
+.recommended-item {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+}
+
+.recommended-item:hover {
+  border-color: var(--accent);
+  background: #f0f5fb;
+}
+
+.recommended-item strong {
+  line-height: 1.45;
+}
+
+.recommended-item p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .toolbar {
