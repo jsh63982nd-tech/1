@@ -52,6 +52,7 @@ public class MainActivity extends Activity {
     private static final int SUBJECT_SONG = 1;
     private static final int SUBJECT_GEN = 2;
     private static final int SUBJECT_GRID = 4;
+    private static final int QUESTION_SEARCH_SCHEMA = 2;
 
     private static final String[] SUBJECT_NAMES = {"송배전공학", "발전공학", "계통공학"};
     private static final String[] SONG_TERMS = {"송전", "배전", "변전", "케이블", "전선", "피뢰", "접지", "차단", "계전", "보호", "분산형전원", "계통연계", "FRT", "전압", "고장"};
@@ -299,7 +300,7 @@ public class MainActivity extends Activity {
     private void refreshQuestions() {
         List<Question> rows = db.search(query, statusFilter, 300);
         questionAdapter.setRows(rows);
-        questionCount.setText(rows.size() + "문제 표시" + (rows.size() >= 300 ? " · 검색어로 더 좁히세요" : ""));
+        questionCount.setText(rows.size() + "문제 표시" + (rows.size() >= 300 ? " · 키워드를 추가하면 더 정확합니다" : ""));
     }
 
     private void showDetail(String id) {
@@ -316,7 +317,7 @@ public class MainActivity extends Activity {
         body.addView(actionButton("목록으로", v -> showQuestions()));
         body.addView(section(q.round));
         body.addView(muted(q.category + " · " + q.keyword + " · " + statusLabel(q.status)));
-        body.addView(card(cleanQuestion(q.question)));
+        body.addView(card(q.displayQuestion));
 
         LinearLayout actions = row();
         actions.addView(smallButton("완료", v -> {
@@ -463,7 +464,7 @@ public class MainActivity extends Activity {
     }
 
     private Button questionButton(Question q, View.OnClickListener listener) {
-        Button button = actionButton(q.round + " · " + q.keyword + " · " + statusLabel(q.status) + "\n" + cleanQuestion(q.question), listener);
+        Button button = actionButton(q.round + " · " + q.keyword + " · " + statusLabel(q.status) + "\n" + q.displayQuestion, listener);
         button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         return button;
     }
@@ -527,7 +528,53 @@ public class MainActivity extends Activity {
     }
 
     private static String normalize(String value) {
-        return String.valueOf(value).replaceAll("\\s+", "").toLowerCase(Locale.KOREA);
+        return String.valueOf(value)
+                .replace('\u00a0', ' ')
+                .replaceAll("[\\s\\-_/·.,;:()\\[\\]{}<>\"']", "")
+                .toLowerCase(Locale.KOREA);
+    }
+
+    private List<String> searchTokens(String value) {
+        List<String> tokens = new ArrayList<>();
+        String whole = normalize(value);
+        String[] parts = String.valueOf(value).trim().split("\\s+");
+        if (parts.length <= 1 && !whole.isEmpty()) {
+            tokens.add(whole);
+        }
+        for (String part : parts) {
+            String token = normalize(part);
+            if (token.length() > 0 && !tokens.contains(token)) {
+                tokens.add(token);
+            }
+        }
+        return tokens;
+    }
+
+    private String splitCompactKorean(String value) {
+        return String.valueOf(value)
+                .replace("과전류", " 과전류 ")
+                .replace("보호", " 보호 ")
+                .replace("계전기", " 계전기 ")
+                .replace("변압기", " 변압기 ")
+                .replace("송전", " 송전 ")
+                .replace("배전", " 배전 ")
+                .replace("발전", " 발전 ")
+                .replace("계통", " 계통 ")
+                .replace("전압", " 전압 ")
+                .replace("전류", " 전류 ")
+                .replace("고장", " 고장 ")
+                .replace("접지", " 접지 ")
+                .replace("피뢰", " 피뢰 ")
+                .replaceAll("\\s{2,}", " ")
+                .trim();
+    }
+
+    private static String sqlLiteral(String value) {
+        return String.valueOf(value).replace("'", "''");
+    }
+
+    private static String sqlLikeLiteral(String value) {
+        return sqlLiteral(value).replace("%", "").replace("_", "");
     }
 
     private LinearLayout paddedColumn() {
@@ -631,6 +678,7 @@ public class MainActivity extends Activity {
         boolean starred;
         String memo;
         int frequency;
+        String displayQuestion;
     }
 
     private static class KeywordRow {
@@ -695,7 +743,7 @@ public class MainActivity extends Activity {
             }
             Question q = getItem(position);
             meta.setText(q.round + " · " + q.keyword + " · " + statusLabel(q.status) + (q.starred ? " · 별표" : ""));
-            title.setText(cleanQuestion(q.question));
+            title.setText(q.displayQuestion);
             box.setBackgroundColor(position % 2 == 0 ? Color.WHITE : rgb(250, 251, 253));
             return box;
         }
@@ -703,22 +751,17 @@ public class MainActivity extends Activity {
 
     private class Db extends SQLiteOpenHelper {
         Db(Context context) {
-            super(context, "power_exam_review_v2.db", null, 1);
+            super(context, "power_exam_review_v2.db", null, 2);
         }
 
         public void onCreate(SQLiteDatabase database) {
-            database.execSQL("CREATE TABLE questions(id TEXT PRIMARY KEY, round TEXT, category TEXT, keyword TEXT, question TEXT, search TEXT, subject INTEGER)");
-            database.execSQL("CREATE TABLE state(id TEXT PRIMARY KEY, status TEXT, starred INTEGER, memo TEXT, reviewedAt TEXT)");
-            database.execSQL("CREATE INDEX idx_questions_search ON questions(search)");
-            database.execSQL("CREATE INDEX idx_questions_keyword ON questions(keyword)");
-            database.execSQL("CREATE INDEX idx_questions_subject ON questions(subject)");
-            database.execSQL("CREATE INDEX idx_state_status ON state(status)");
+            ensureSchema(database);
         }
 
         public void onUpgrade(SQLiteDatabase database, int oldVersion, int newVersion) {
             database.execSQL("DROP TABLE IF EXISTS questions");
-            database.execSQL("DROP TABLE IF EXISTS state");
-            onCreate(database);
+            database.execSQL("DROP TABLE IF EXISTS metadata");
+            ensureSchema(database);
         }
 
         void seedIfNeeded() {
@@ -730,34 +773,51 @@ public class MainActivity extends Activity {
                 throw new IllegalStateException("question asset read failed", error);
             }
             int existing = scalarInt(database, "SELECT COUNT(*) FROM questions");
-            if (existing == array.length()) return;
+            int schema = metadataInt(database, "questionSearchSchema");
+            if (existing == array.length() && schema == QUESTION_SEARCH_SCHEMA) return;
             database.beginTransaction();
             try {
-                database.execSQL("DELETE FROM questions");
-                for (int i = 0; i < array.length(); i++) {
-                    JSONObject obj = array.getJSONObject(i);
-                    String id = obj.optString("id");
-                    String round = obj.optString("round");
-                    String category = obj.optString("category");
-                    String keyword = normalizeKeyword(obj.optString("keyword"));
-                    String question = obj.optString("question");
-                    String search = normalize(round + category + keyword + question);
-                    int subject = computeSubjectMask(category + keyword + question);
-                    ContentValues values = new ContentValues();
-                    values.put("id", id);
-                    values.put("round", round);
-                    values.put("category", category);
-                    values.put("keyword", keyword);
-                    values.put("question", question);
-                    values.put("search", search);
-                    values.put("subject", subject);
-                    database.insert("questions", null, values);
-                }
+                rebuildQuestions(database, array);
+                setMetadata(database, "questionSearchSchema", String.valueOf(QUESTION_SEARCH_SCHEMA));
                 database.setTransactionSuccessful();
             } catch (Exception error) {
                 throw new IllegalStateException("question seed failed", error);
             } finally {
                 database.endTransaction();
+            }
+        }
+
+        private void ensureSchema(SQLiteDatabase database) {
+            database.execSQL("CREATE TABLE IF NOT EXISTS questions(id TEXT PRIMARY KEY, round TEXT, category TEXT, keyword TEXT, question TEXT, search TEXT, subject INTEGER)");
+            database.execSQL("CREATE TABLE IF NOT EXISTS state(id TEXT PRIMARY KEY, status TEXT, starred INTEGER, memo TEXT, reviewedAt TEXT)");
+            database.execSQL("CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT)");
+            database.execSQL("CREATE INDEX IF NOT EXISTS idx_questions_search ON questions(search)");
+            database.execSQL("CREATE INDEX IF NOT EXISTS idx_questions_keyword ON questions(keyword)");
+            database.execSQL("CREATE INDEX IF NOT EXISTS idx_questions_subject ON questions(subject)");
+            database.execSQL("CREATE INDEX IF NOT EXISTS idx_state_status ON state(status)");
+        }
+
+        private void rebuildQuestions(SQLiteDatabase database, JSONArray array) throws Exception {
+            database.execSQL("DELETE FROM questions");
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject obj = array.getJSONObject(i);
+                String id = obj.optString("id");
+                String round = obj.optString("round");
+                String category = obj.optString("category");
+                String keyword = normalizeKeyword(obj.optString("keyword"));
+                String question = obj.optString("question");
+                String cleaned = cleanQuestion(question);
+                String search = normalize(round + " " + category + " " + keyword + " " + splitCompactKorean(keyword) + " " + question + " " + cleaned);
+                int subject = computeSubjectMask(category + keyword + question + cleaned);
+                ContentValues values = new ContentValues();
+                values.put("id", id);
+                values.put("round", round);
+                values.put("category", category);
+                values.put("keyword", keyword);
+                values.put("question", question);
+                values.put("search", search);
+                values.put("subject", subject);
+                database.insert("questions", null, values);
             }
         }
 
@@ -771,8 +831,10 @@ public class MainActivity extends Activity {
             StringBuilder where = new StringBuilder("1=1");
             String normalized = normalize(query);
             if (!normalized.isEmpty()) {
-                where.append(" AND q.search LIKE ?");
-                args.add("%" + normalized + "%");
+                for (String token : searchTokens(query)) {
+                    where.append(" AND q.search LIKE ?");
+                    args.add("%" + token + "%");
+                }
             }
             if (FILTER_STARRED.equals(status)) {
                 where.append(" AND IFNULL(s.starred,0)=1");
@@ -780,11 +842,20 @@ public class MainActivity extends Activity {
                 where.append(" AND IFNULL(s.status,'unseen')=?");
                 args.add(status);
             }
-            return query(where.toString(), args.toArray(new String[0]), "q.round, q.id", limit);
+            String order = "q.round, q.id";
+            if (!normalized.isEmpty()) {
+                order = "CASE WHEN q.search LIKE '%" + sqlLikeLiteral(normalized) + "%' THEN 0 ELSE 1 END, " +
+                        "CASE WHEN q.keyword LIKE '%" + sqlLikeLiteral(query.trim()) + "%' THEN 0 ELSE 1 END, " +
+                        "q.round, q.id";
+            }
+            return query(where.toString(), args.toArray(new String[0]), order, limit);
         }
 
         List<Question> recommended() {
-            return query("(q.subject & 1) != 0 AND IFNULL(s.status,'unseen') != 'done'", new String[0], "CASE IFNULL(s.status,'unseen') WHEN 'weak' THEN 0 ELSE 1 END, q.keyword, q.round", 2);
+            return query("(q.subject & 1) != 0 AND IFNULL(s.status,'unseen') != 'done'", new String[0],
+                    "CASE IFNULL(s.status,'unseen') WHEN 'weak' THEN 0 ELSE 1 END, " +
+                            "CASE WHEN q.search LIKE '%보호%' OR q.search LIKE '%계전%' OR q.search LIKE '%전압%' OR q.search LIKE '%고장%' THEN 0 ELSE 1 END, " +
+                            "(SELECT COUNT(*) FROM questions k WHERE k.keyword=q.keyword) DESC, q.keyword, q.round", 2);
         }
 
         List<KeywordRow> frequentRows(int subject, int limit) {
@@ -985,6 +1056,7 @@ public class MainActivity extends Activity {
             q.starred = cursor.getInt(6) == 1;
             q.memo = cursor.getString(7);
             q.frequency = cursor.getInt(8);
+            q.displayQuestion = cleanQuestion(q.question);
             return q;
         }
 
@@ -1004,6 +1076,25 @@ public class MainActivity extends Activity {
             } finally {
                 cursor.close();
             }
+        }
+
+        private int metadataInt(SQLiteDatabase database, String key) {
+            Cursor cursor = database.rawQuery("SELECT value FROM metadata WHERE key=?", new String[]{key});
+            try {
+                if (!cursor.moveToFirst()) return 0;
+                return Integer.parseInt(cursor.getString(0));
+            } catch (Exception ignored) {
+                return 0;
+            } finally {
+                cursor.close();
+            }
+        }
+
+        private void setMetadata(SQLiteDatabase database, String key, String value) {
+            ContentValues values = new ContentValues();
+            values.put("key", key);
+            values.put("value", value);
+            database.insertWithOnConflict("metadata", null, values, SQLiteDatabase.CONFLICT_REPLACE);
         }
 
         private String normalizeKeyword(String keyword) {
