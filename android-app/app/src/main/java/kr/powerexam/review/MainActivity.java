@@ -1,19 +1,26 @@
 package kr.powerexam.review;
 
 import android.app.Activity;
-import android.content.SharedPreferences;
+import android.content.ContentValues;
+import android.content.Context;
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteOpenHelper;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
-import android.content.Context;
+import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -24,407 +31,360 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 public class MainActivity extends Activity {
-    private final List<Question> questions = new ArrayList<>();
-    private final Map<String, Integer> keywordCounts = new HashMap<>();
-    private SharedPreferences prefs;
-    private LinearLayout content;
-    private String searchText = "";
-    private String statusFilter = "all";
-    private String frequentSubject = "송배전공학";
+    private static final String FILTER_ALL = "all";
+    private static final String FILTER_UNSEEN = "unseen";
+    private static final String FILTER_WEAK = "weak";
+    private static final String FILTER_DONE = "done";
+    private static final String FILTER_STARRED = "starred";
+    private static final int SUBJECT_SONG = 1;
+    private static final int SUBJECT_GEN = 2;
+    private static final int SUBJECT_GRID = 4;
 
-    private static final String[] SUBJECTS = {"송배전공학", "발전공학", "계통공학"};
-    private static final String[] SONG_KEYWORDS = {
-            "송전", "배전", "변전", "케이블", "전선", "피뢰", "접지", "차단", "계전", "분산형전원", "계통연계", "FRT", "전압", "고장"
-    };
-    private static final String[] GEN_KEYWORDS = {
-            "발전", "발전기", "화력", "수력", "원자력", "태양광", "풍력", "터빈", "보일러", "수차", "ESS", "연료전지"
-    };
-    private static final String[] GRID_KEYWORDS = {
-            "계통", "조류", "안정도", "주파수", "무효전력", "고조파", "전력시장", "예비력", "신뢰도", "HVDC", "STATCOM", "SVC"
-    };
+    private static final String[] SUBJECT_NAMES = {"송배전공학", "발전공학", "계통공학"};
+    private static final String[] SONG_TERMS = {"송전", "배전", "변전", "케이블", "전선", "피뢰", "접지", "차단", "계전", "보호", "분산형전원", "계통연계", "FRT", "전압", "고장"};
+    private static final String[] GEN_TERMS = {"발전", "발전기", "화력", "수력", "원자력", "태양광", "풍력", "터빈", "보일러", "수차", "ESS", "연료전지"};
+    private static final String[] GRID_TERMS = {"계통", "조류", "안정도", "주파수", "무효전력", "고조파", "전력시장", "예비력", "신뢰도", "HVDC", "STATCOM", "SVC"};
+
+    private Db db;
+    private LinearLayout root;
+    private FrameLayout screen;
+    private String query = "";
+    private String statusFilter = FILTER_ALL;
+    private String frequentSubject = SUBJECT_NAMES[0];
+    private QuestionAdapter questionAdapter;
+    private TextView questionCount;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        prefs = getSharedPreferences("review-state", MODE_PRIVATE);
-        loadQuestions();
-        buildKeywordCounts();
-        renderShell();
-        renderHome();
+        db = new Db(this);
+        db.seedIfNeeded();
+        buildShell();
+        showHome();
     }
 
-    private void renderShell() {
-        LinearLayout root = new LinearLayout(this);
+    private void buildShell() {
+        root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(246, 247, 249));
+        root.setBackgroundColor(rgb(246, 247, 249));
 
-        TextView title = text("발송배전기술사 기출회독", 22, true);
-        title.setPadding(dp(18), dp(18), dp(18), dp(8));
+        TextView title = text("발송배전기술사 기출회독", 21, true);
+        title.setPadding(dp(16), dp(16), dp(16), dp(8));
         root.addView(title);
 
         HorizontalScrollView navScroll = new HorizontalScrollView(this);
         navScroll.setHorizontalScrollBarEnabled(false);
-        LinearLayout nav = new LinearLayout(this);
-        nav.setOrientation(LinearLayout.HORIZONTAL);
-        nav.setPadding(dp(12), dp(4), dp(12), dp(10));
-        nav.addView(navButton("홈", v -> renderHome()));
-        nav.addView(navButton("문제", v -> renderQuestions()));
-        nav.addView(navButton("빈출", v -> renderFrequent()));
-        nav.addView(navButton("통계", v -> renderStats()));
+        LinearLayout nav = row();
+        nav.setPadding(dp(10), 0, dp(10), dp(8));
+        nav.addView(navButton("홈", v -> showHome()));
+        nav.addView(navButton("문제", v -> showQuestions()));
+        nav.addView(navButton("빈출", v -> showFrequent()));
+        nav.addView(navButton("통계", v -> showStats()));
         navScroll.addView(nav);
         root.addView(navScroll);
 
-        ScrollView scroll = new ScrollView(this);
-        content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(14), dp(8), dp(14), dp(28));
-        scroll.addView(content);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        screen = new FrameLayout(this);
+        root.addView(screen, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(root);
     }
 
-    private Button navButton(String label, View.OnClickListener listener) {
-        Button button = new Button(this);
-        button.setText(label);
-        button.setTextSize(15);
-        button.setAllCaps(false);
-        button.setOnClickListener(listener);
-        button.setPadding(dp(12), 0, dp(12), 0);
-        return button;
-    }
+    private void showHome() {
+        LinearLayout body = paddedColumn();
+        screen.removeAllViews();
+        screen.addView(wrapScroll(body));
 
-    private void renderHome() {
-        clear();
-        int done = 0;
-        int weak = 0;
-        int starred = 0;
-        for (Question q : questions) {
-            if ("done".equals(status(q))) done++;
-            if ("weak".equals(status(q))) weak++;
-            if (starred(q)) starred++;
-        }
+        Stats stats = db.stats();
+        body.addView(section("오늘 볼 것"));
+        body.addView(card("전체 " + stats.total + "문제\n미회독 " + stats.unseen + " · 완료 " + stats.done + " · 취약 " + stats.weak + " · 별표 " + stats.starred));
+        body.addView(actionButton("미회독 시작", v -> {
+            statusFilter = FILTER_UNSEEN;
+            showQuestions();
+        }));
+        body.addView(actionButton("취약 문제 보기", v -> {
+            statusFilter = FILTER_WEAK;
+            showQuestions();
+        }));
 
-        addSectionTitle("오늘 볼 것");
-        addCard("전체 " + questions.size() + "문제\n완료 " + done + " · 취약 " + weak + " · 즐겨찾기 " + starred);
-        addButton("미회독 시작", v -> {
-            statusFilter = "unseen";
-            renderQuestions();
-        });
-        addButton("취약 문제 보기", v -> {
-            statusFilter = "weak";
-            renderQuestions();
-        });
-
-        addSectionTitle("추천 문제 2개");
-        for (Question q : recommended()) {
-            Button b = listButton(q.round + " · " + keyword(q) + "\n" + displayQuestion(q.question));
-            b.setOnClickListener(v -> renderDetail(q));
-            content.addView(b);
+        body.addView(section("추천 문제 2개"));
+        for (Question q : db.recommended()) {
+            body.addView(questionButton(q, v -> showDetail(q.id)));
         }
     }
 
-    private void renderQuestions() {
-        clear();
-        addSectionTitle("문제풀이");
+    private void showQuestions() {
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(12), dp(8), dp(12), dp(8));
+        screen.removeAllViews();
+        screen.addView(body);
+
         EditText search = new EditText(this);
         search.setHint("키워드, 회차, 문제 검색");
         search.setSingleLine(true);
-        search.setText(searchText);
+        search.setText(query);
+        search.setTextSize(15);
         search.setPadding(dp(12), dp(8), dp(12), dp(8));
-        content.addView(search);
+        body.addView(search, new LinearLayout.LayoutParams(-1, -2));
+
+        HorizontalScrollView filterScroll = new HorizontalScrollView(this);
+        filterScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout filters = row();
+        addFilter(filters, FILTER_ALL, "전체");
+        addFilter(filters, FILTER_UNSEEN, "미회독");
+        addFilter(filters, FILTER_WEAK, "취약");
+        addFilter(filters, FILTER_DONE, "완료");
+        addFilter(filters, FILTER_STARRED, "별표");
+        filterScroll.addView(filters);
+        body.addView(filterScroll);
+
+        questionCount = muted("");
+        questionCount.setPadding(dp(4), dp(6), dp(4), dp(6));
+        body.addView(questionCount);
+
+        ListView list = new ListView(this);
+        list.setDividerHeight(0);
+        list.setCacheColorHint(Color.TRANSPARENT);
+        questionAdapter = new QuestionAdapter(this);
+        list.setAdapter(questionAdapter);
+        list.setOnItemClickListener((parent, view, position, id) -> showDetail(questionAdapter.getItem(position).id));
+        body.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
+
         search.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-                searchText = s.toString();
-                renderQuestionRows();
-            }
             public void afterTextChanged(Editable s) {}
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                query = s.toString();
+                refreshQuestions();
+            }
         });
-
-        LinearLayout filters = new LinearLayout(this);
-        filters.setOrientation(LinearLayout.HORIZONTAL);
-        String[] labels = {"all:전체", "unseen:미회독", "weak:취약", "done:완료", "starred:별표"};
-        for (String item : labels) {
-            String[] parts = item.split(":");
-            Button b = navButton(parts[1], v -> {
-                statusFilter = parts[0];
-                renderQuestions();
-            });
-            filters.addView(b);
-        }
-        content.addView(filters);
-        hideKeyboard(search);
-        renderQuestionRows();
+        search.postDelayed(() -> hideKeyboard(search), 150);
+        refreshQuestions();
     }
 
-    private void renderQuestionRows() {
-        while (content.getChildCount() > 3) {
-            content.removeViewAt(3);
-        }
-        List<Question> rows = filteredQuestions();
-        addMuted(rows.size() + "문제");
-        int limit = Math.min(rows.size(), 160);
-        for (int i = 0; i < limit; i++) {
-            Question q = rows.get(i);
-            Button b = listButton(q.round + " · " + keyword(q) + " · " + statusLabel(q) + "\n" + displayQuestion(q.question));
-            b.setOnClickListener(v -> renderDetail(q));
-            content.addView(b);
-        }
-        if (rows.size() > limit) {
-            addMuted("검색어를 입력하면 나머지 문제를 더 좁혀볼 수 있습니다.");
-        }
+    private void refreshQuestions() {
+        List<Question> rows = db.search(query, statusFilter, 300);
+        questionAdapter.setRows(rows);
+        questionCount.setText(rows.size() + "문제 표시" + (rows.size() >= 300 ? " · 검색어로 더 좁히세요" : ""));
     }
 
-    private void renderDetail(Question q) {
-        clear();
-        addButton("목록으로", v -> renderQuestions());
-        addSectionTitle(q.round);
-        addMuted(q.category + " · " + keyword(q) + " · " + statusLabel(q));
-        addCard(displayQuestion(q.question));
+    private void showDetail(String id) {
+        Question q = db.find(id);
+        if (q == null) {
+            showQuestions();
+            return;
+        }
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        actions.addView(navButton("완료", v -> setStatus(q, "done")));
-        actions.addView(navButton("취약", v -> setStatus(q, "weak")));
-        actions.addView(navButton("미회독", v -> setStatus(q, "unseen")));
-        actions.addView(navButton(starred(q) ? "별표 해제" : "별표", v -> {
-            prefs.edit().putBoolean("star_" + q.id, !starred(q)).apply();
-            renderDetail(q);
+        LinearLayout body = paddedColumn();
+        screen.removeAllViews();
+        screen.addView(wrapScroll(body));
+
+        body.addView(actionButton("목록으로", v -> showQuestions()));
+        body.addView(section(q.round));
+        body.addView(muted(q.category + " · " + q.keyword + " · " + statusLabel(q.status)));
+        body.addView(card(cleanQuestion(q.question)));
+
+        LinearLayout actions = row();
+        actions.addView(smallButton("완료", v -> {
+            db.setStatus(q.id, FILTER_DONE);
+            showDetail(q.id);
         }));
-        content.addView(actions);
+        actions.addView(smallButton("취약", v -> {
+            db.setStatus(q.id, FILTER_WEAK);
+            showDetail(q.id);
+        }));
+        actions.addView(smallButton("미회독", v -> {
+            db.setStatus(q.id, FILTER_UNSEEN);
+            showDetail(q.id);
+        }));
+        actions.addView(smallButton(q.starred ? "별표 해제" : "별표", v -> {
+            db.setStarred(q.id, !q.starred);
+            showDetail(q.id);
+        }));
+        body.addView(actions);
 
-        addSectionTitle("메모");
+        body.addView(section("메모"));
         EditText memo = new EditText(this);
         memo.setMinLines(4);
-        memo.setText(prefs.getString("memo_" + q.id, ""));
-        content.addView(memo);
-        addButton("메모 저장", v -> {
-            prefs.edit().putString("memo_" + q.id, memo.getText().toString()).apply();
+        memo.setText(q.memo);
+        memo.setTextSize(15);
+        body.addView(memo, new LinearLayout.LayoutParams(-1, -2));
+        body.addView(actionButton("메모 저장", v -> {
+            db.setMemo(q.id, memo.getText().toString());
             hideKeyboard(memo);
-        });
+        }));
 
-        addSectionTitle("답안 키워드");
-        addCard(studyKeywords(q));
+        body.addView(section("답안 키워드"));
+        body.addView(card(studyKeywords(q)));
     }
 
-    private void renderFrequent() {
-        clear();
-        addSectionTitle("과목별 빈출문제");
-        LinearLayout subjects = new LinearLayout(this);
-        subjects.setOrientation(LinearLayout.HORIZONTAL);
-        for (String subject : SUBJECTS) {
-            subjects.addView(navButton(subject, v -> {
-                frequentSubject = ((Button) v).getText().toString();
-                renderFrequent();
+    private void showFrequent() {
+        LinearLayout body = paddedColumn();
+        screen.removeAllViews();
+        screen.addView(wrapScroll(body));
+
+        body.addView(section("과목별 빈출문제"));
+        LinearLayout subjects = row();
+        for (String subject : SUBJECT_NAMES) {
+            final String name = subject;
+            subjects.addView(smallButton(name, v -> {
+                frequentSubject = name;
+                showFrequent();
             }));
         }
-        content.addView(subjects);
+        body.addView(subjects);
+        body.addView(muted(frequentSubject));
 
-        Map<String, Integer> counts = new HashMap<>();
-        for (Question q : questions) {
-            if (!matchesSubject(q, frequentSubject)) continue;
-            String k = keyword(q);
-            counts.put(k, counts.getOrDefault(k, 0) + 1);
-        }
-        List<Map.Entry<String, Integer>> rows = new ArrayList<>(counts.entrySet());
-        rows.sort((a, b) -> b.getValue().compareTo(a.getValue()));
-        int limit = Math.min(rows.size(), 60);
-        for (int i = 0; i < limit; i++) {
-            Map.Entry<String, Integer> row = rows.get(i);
-            Button b = listButton(row.getKey() + " · " + row.getValue() + "문제");
-            b.setOnClickListener(v -> {
-                searchText = row.getKey();
-                statusFilter = "all";
-                renderQuestions();
+        for (KeywordRow row : db.frequentRows(subjectMask(frequentSubject), 80)) {
+            Button button = actionButton(row.keyword + " · " + row.count + "문제", v -> {
+                query = row.keyword;
+                statusFilter = FILTER_ALL;
+                showQuestions();
             });
-            content.addView(b);
+            body.addView(button);
         }
     }
 
-    private void renderStats() {
-        clear();
-        addSectionTitle("통계");
-        Map<String, Integer> status = new HashMap<>();
-        Map<String, Integer> category = new HashMap<>();
-        for (Question q : questions) {
-            status.put(status(q), status.getOrDefault(status(q), 0) + 1);
-            category.put(q.category, category.getOrDefault(q.category, 0) + 1);
-        }
-        addCard("미회독 " + status.getOrDefault("unseen", 0) + "\n완료 " + status.getOrDefault("done", 0) + "\n취약 " + status.getOrDefault("weak", 0));
-        addSectionTitle("분야");
-        for (Map.Entry<String, Integer> row : category.entrySet()) {
-            addMuted(row.getKey() + " · " + row.getValue() + "문제");
-        }
+    private void showStats() {
+        LinearLayout body = paddedColumn();
+        screen.removeAllViews();
+        screen.addView(wrapScroll(body));
+
+        Stats stats = db.stats();
+        body.addView(section("통계"));
+        body.addView(card("전체 " + stats.total + "\n미회독 " + stats.unseen + "\n완료 " + stats.done + "\n취약 " + stats.weak + "\n별표 " + stats.starred));
+        body.addView(section("과목 추정"));
+        body.addView(card("송배전공학 " + db.subjectCount(SUBJECT_SONG) + "문제\n발전공학 " + db.subjectCount(SUBJECT_GEN) + "문제\n계통공학 " + db.subjectCount(SUBJECT_GRID) + "문제"));
     }
 
-    private void setStatus(Question q, String value) {
-        SharedPreferences.Editor editor = prefs.edit().putString("status_" + q.id, value);
-        if ("done".equals(value)) {
-            editor.putString("date_" + q.id, new SimpleDateFormat("yyyy-MM-dd", Locale.KOREA).format(new Date()));
-        }
-        editor.apply();
-        renderDetail(q);
-    }
-
-    private List<Question> filteredQuestions() {
-        String needle = normalize(searchText);
-        List<Question> rows = new ArrayList<>();
-        for (Question q : questions) {
-            if ("starred".equals(statusFilter) && !starred(q)) continue;
-            if (!"all".equals(statusFilter) && !"starred".equals(statusFilter) && !statusFilter.equals(status(q))) continue;
-            String haystack = normalize(q.round + " " + q.category + " " + keyword(q) + " " + q.question);
-            if (!needle.isEmpty() && !haystack.contains(needle)) continue;
-            rows.add(q);
-        }
-        return rows;
-    }
-
-    private List<Question> recommended() {
-        List<Question> rows = new ArrayList<>();
-        for (Question q : questions) {
-            if (matchesSubject(q, "송배전공학") && !"done".equals(status(q))) rows.add(q);
-        }
-        rows.sort((a, b) -> {
-            int scoreA = ("weak".equals(status(a)) ? 100 : 0) + keywordCounts.getOrDefault(keyword(a), 1);
-            int scoreB = ("weak".equals(status(b)) ? 100 : 0) + keywordCounts.getOrDefault(keyword(b), 1);
-            return Integer.compare(scoreB, scoreA);
+    private void addFilter(LinearLayout filters, String value, String label) {
+        Button button = smallButton(label + (value.equals(statusFilter) ? " *" : ""), v -> {
+            statusFilter = value;
+            showQuestions();
         });
-        return rows.subList(0, Math.min(2, rows.size()));
+        filters.addView(button);
     }
 
-    private boolean matchesSubject(Question q, String subject) {
-        String text = q.category + " " + q.keyword + " " + q.question;
-        String[] words = SONG_KEYWORDS;
-        if ("발전공학".equals(subject)) words = GEN_KEYWORDS;
-        if ("계통공학".equals(subject)) words = GRID_KEYWORDS;
-        for (String word : words) {
-            if (text.contains(word)) return true;
+    private Button questionButton(Question q, View.OnClickListener listener) {
+        Button button = actionButton(q.round + " · " + q.keyword + " · " + statusLabel(q.status) + "\n" + cleanQuestion(q.question), listener);
+        button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        return button;
+    }
+
+    private String studyKeywords(Question q) {
+        Set<String> terms = new HashSet<>();
+        terms.add(q.keyword);
+        String text = q.question + " " + q.keyword;
+        String[] candidates = {"정의", "원리", "특징", "장점", "단점", "문제점", "대책", "보호장치", "전압", "주파수", "고장전류", "단락용량", "FRT", "단독운전", "피뢰기", "접지", "계통연계", "무효전력"};
+        for (String candidate : candidates) {
+            if (text.contains(candidate)) terms.add(candidate);
+        }
+        return String.join(" · ", terms);
+    }
+
+    private String statusLabel(String status) {
+        if (FILTER_DONE.equals(status)) return "완료";
+        if (FILTER_WEAK.equals(status)) return "취약";
+        return "미회독";
+    }
+
+    private String cleanQuestion(String value) {
+        return String.valueOf(value).replaceAll("\\s+", " ").trim();
+    }
+
+    private int subjectMask(String subject) {
+        if ("발전공학".equals(subject)) return SUBJECT_GEN;
+        if ("계통공학".equals(subject)) return SUBJECT_GRID;
+        return SUBJECT_SONG;
+    }
+
+    private static int computeSubjectMask(String text) {
+        int mask = 0;
+        if (containsAny(text, SONG_TERMS)) mask |= SUBJECT_SONG;
+        if (containsAny(text, GEN_TERMS)) mask |= SUBJECT_GEN;
+        if (containsAny(text, GRID_TERMS)) mask |= SUBJECT_GRID;
+        return mask == 0 ? SUBJECT_SONG : mask;
+    }
+
+    private static boolean containsAny(String text, String[] terms) {
+        for (String term : terms) {
+            if (text.contains(term)) return true;
         }
         return false;
     }
 
-    private String studyKeywords(Question q) {
-        Set<String> result = new HashSet<>();
-        result.add(keyword(q));
-        String text = q.question;
-        String[] terms = {"정의", "원리", "특징", "장점", "단점", "문제점", "대책", "보호장치", "전압", "주파수", "고장전류", "단락용량", "FRT", "단독운전", "피뢰기", "접지"};
-        for (String term : terms) {
-            if (text.contains(term)) result.add(term);
-        }
-        return String.join(" · ", result);
+    private static String normalize(String value) {
+        return String.valueOf(value).replaceAll("\\s+", "").toLowerCase(Locale.KOREA);
     }
 
-    private void loadQuestions() {
-        try {
-            InputStream input = getAssets().open("questions.json");
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buffer = new byte[8192];
-            int read;
-            while ((read = input.read(buffer)) != -1) out.write(buffer, 0, read);
-            JSONArray array = new JSONArray(out.toString("UTF-8"));
-            for (int i = 0; i < array.length(); i++) {
-                JSONObject obj = array.getJSONObject(i);
-                questions.add(new Question(
-                        obj.optString("id"),
-                        obj.optString("round"),
-                        obj.optString("category"),
-                        obj.optString("keyword"),
-                        obj.optString("question")
-                ));
-            }
-        } catch (Exception error) {
-            throw new IllegalStateException("questions.json load failed", error);
-        }
+    private LinearLayout paddedColumn() {
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(14), dp(8), dp(14), dp(28));
+        return body;
     }
 
-    private void buildKeywordCounts() {
-        for (Question q : questions) {
-            String key = keyword(q);
-            keywordCounts.put(key, keywordCounts.getOrDefault(key, 0) + 1);
-        }
+    private LinearLayout row() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        return row;
     }
 
-    private String keyword(Question q) {
-        if ("고장파급방지장치".equals(q.keyword)) return "SPS";
-        if ("전력계통안정화장치".equals(q.keyword)) return "PSS";
-        if ("태양광인버터효율".equals(q.keyword)) return "태양광인버터";
-        return q.keyword == null || q.keyword.isEmpty() ? "기타" : q.keyword;
+    private ScrollView wrapScroll(View view) {
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(view);
+        return scroll;
     }
 
-    private String status(Question q) {
-        return prefs.getString("status_" + q.id, "unseen");
-    }
-
-    private boolean starred(Question q) {
-        return prefs.getBoolean("star_" + q.id, false);
-    }
-
-    private String statusLabel(Question q) {
-        String status = status(q);
-        if ("done".equals(status)) return "완료";
-        if ("weak".equals(status)) return "취약";
-        return "미회독";
-    }
-
-    private String displayQuestion(String value) {
-        return value.replace("설명하시오.", "설명하시오.").replaceAll("\\s+", " ").trim();
-    }
-
-    private String normalize(String value) {
-        return value == null ? "" : value.replaceAll("\\s+", "").toLowerCase(Locale.KOREA);
-    }
-
-    private void clear() {
-        content.removeAllViews();
-    }
-
-    private void addSectionTitle(String value) {
+    private TextView section(String value) {
         TextView view = text(value, 19, true);
         view.setPadding(0, dp(14), 0, dp(8));
-        content.addView(view);
+        return view;
     }
 
-    private void addMuted(String value) {
+    private TextView muted(String value) {
         TextView view = text(value, 14, false);
-        view.setTextColor(Color.rgb(91, 102, 117));
-        view.setPadding(dp(4), dp(4), dp(4), dp(4));
-        content.addView(view);
+        view.setTextColor(rgb(83, 94, 110));
+        return view;
     }
 
-    private void addCard(String value) {
+    private TextView card(String value) {
         TextView view = text(value, 16, false);
         view.setLineSpacing(dp(3), 1.0f);
-        view.setTextColor(Color.rgb(23, 33, 45));
         view.setBackgroundColor(Color.WHITE);
         view.setPadding(dp(14), dp(12), dp(14), dp(12));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
         params.setMargins(0, 0, 0, dp(10));
-        content.addView(view, params);
+        view.setLayoutParams(params);
+        return view;
     }
 
-    private void addButton(String label, View.OnClickListener listener) {
-        Button b = listButton(label);
-        b.setGravity(Gravity.CENTER);
-        b.setOnClickListener(listener);
-        content.addView(b);
+    private Button navButton(String label, View.OnClickListener listener) {
+        Button button = smallButton(label, listener);
+        button.setMinWidth(dp(72));
+        return button;
     }
 
-    private Button listButton(String label) {
+    private Button smallButton(String label, View.OnClickListener listener) {
         Button button = new Button(this);
         button.setText(label);
         button.setAllCaps(false);
+        button.setTextSize(14);
+        button.setOnClickListener(listener);
+        button.setPadding(dp(10), 0, dp(10), 0);
+        return button;
+    }
+
+    private Button actionButton(String label, View.OnClickListener listener) {
+        Button button = smallButton(label, listener);
         button.setTextSize(15);
-        button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        button.setGravity(Gravity.CENTER);
         button.setPadding(dp(12), dp(10), dp(12), dp(10));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
         params.setMargins(0, 0, 0, dp(8));
@@ -436,35 +396,319 @@ public class MainActivity extends Activity {
         TextView view = new TextView(this);
         view.setText(value);
         view.setTextSize(sp);
-        view.setTextColor(Color.rgb(23, 33, 45));
-        if (bold) view.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        view.setTextColor(rgb(23, 33, 45));
+        if (bold) view.setTypeface(Typeface.DEFAULT_BOLD);
         return view;
     }
 
     private void hideKeyboard(View view) {
-        view.postDelayed(() -> {
-            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-            if (imm != null) imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
-        }, 100);
+        InputMethodManager manager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (manager != null) manager.hideSoftInputFromWindow(view.getWindowToken(), 0);
     }
 
     private int dp(int value) {
         return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
 
-    static class Question {
-        final String id;
-        final String round;
-        final String category;
-        final String keyword;
-        final String question;
+    private int rgb(int r, int g, int b) {
+        return Color.rgb(r, g, b);
+    }
 
-        Question(String id, String round, String category, String keyword, String question) {
-            this.id = id;
-            this.round = round;
-            this.category = category;
-            this.keyword = keyword;
-            this.question = question;
+    private static class Question {
+        String id;
+        String round;
+        String category;
+        String keyword;
+        String question;
+        String status;
+        boolean starred;
+        String memo;
+        int frequency;
+    }
+
+    private static class KeywordRow {
+        String keyword;
+        int count;
+    }
+
+    private static class Stats {
+        int total;
+        int unseen;
+        int done;
+        int weak;
+        int starred;
+    }
+
+    private class QuestionAdapter extends BaseAdapter {
+        private final Context context;
+        private final List<Question> rows = new ArrayList<>();
+
+        QuestionAdapter(Context context) {
+            this.context = context;
+        }
+
+        void setRows(List<Question> next) {
+            rows.clear();
+            rows.addAll(next);
+            notifyDataSetChanged();
+        }
+
+        public int getCount() {
+            return rows.size();
+        }
+
+        public Question getItem(int position) {
+            return rows.get(position);
+        }
+
+        public long getItemId(int position) {
+            return position;
+        }
+
+        public View getView(int position, View convertView, android.view.ViewGroup parent) {
+            LinearLayout box;
+            TextView meta;
+            TextView title;
+            if (convertView == null) {
+                box = new LinearLayout(context);
+                box.setOrientation(LinearLayout.VERTICAL);
+                box.setPadding(dp(12), dp(10), dp(12), dp(10));
+                meta = text("", 12, false);
+                meta.setTextColor(rgb(83, 94, 110));
+                title = text("", 15, true);
+                title.setPadding(0, dp(3), 0, 0);
+                box.addView(meta);
+                box.addView(title);
+                box.setTag(new TextView[]{meta, title});
+            } else {
+                box = (LinearLayout) convertView;
+                TextView[] views = (TextView[]) box.getTag();
+                meta = views[0];
+                title = views[1];
+            }
+            Question q = getItem(position);
+            meta.setText(q.round + " · " + q.keyword + " · " + statusLabel(q.status) + (q.starred ? " · 별표" : ""));
+            title.setText(cleanQuestion(q.question));
+            box.setBackgroundColor(position % 2 == 0 ? Color.WHITE : rgb(250, 251, 253));
+            return box;
+        }
+    }
+
+    private class Db extends SQLiteOpenHelper {
+        Db(Context context) {
+            super(context, "power_exam_review_v2.db", null, 1);
+        }
+
+        public void onCreate(SQLiteDatabase database) {
+            database.execSQL("CREATE TABLE questions(id TEXT PRIMARY KEY, round TEXT, category TEXT, keyword TEXT, question TEXT, search TEXT, subject INTEGER)");
+            database.execSQL("CREATE TABLE state(id TEXT PRIMARY KEY, status TEXT, starred INTEGER, memo TEXT, reviewedAt TEXT)");
+            database.execSQL("CREATE INDEX idx_questions_search ON questions(search)");
+            database.execSQL("CREATE INDEX idx_questions_keyword ON questions(keyword)");
+            database.execSQL("CREATE INDEX idx_questions_subject ON questions(subject)");
+            database.execSQL("CREATE INDEX idx_state_status ON state(status)");
+        }
+
+        public void onUpgrade(SQLiteDatabase database, int oldVersion, int newVersion) {
+            database.execSQL("DROP TABLE IF EXISTS questions");
+            database.execSQL("DROP TABLE IF EXISTS state");
+            onCreate(database);
+        }
+
+        void seedIfNeeded() {
+            SQLiteDatabase database = getWritableDatabase();
+            int existing = scalarInt(database, "SELECT COUNT(*) FROM questions");
+            if (existing == assetCount()) return;
+            database.beginTransaction();
+            try {
+                database.execSQL("DELETE FROM questions");
+                JSONArray array = readAssetQuestions();
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject obj = array.getJSONObject(i);
+                    String id = obj.optString("id");
+                    String round = obj.optString("round");
+                    String category = obj.optString("category");
+                    String keyword = normalizeKeyword(obj.optString("keyword"));
+                    String question = obj.optString("question");
+                    String search = normalize(round + category + keyword + question);
+                    int subject = computeSubjectMask(category + keyword + question);
+                    ContentValues values = new ContentValues();
+                    values.put("id", id);
+                    values.put("round", round);
+                    values.put("category", category);
+                    values.put("keyword", keyword);
+                    values.put("question", question);
+                    values.put("search", search);
+                    values.put("subject", subject);
+                    database.insert("questions", null, values);
+                }
+                database.setTransactionSuccessful();
+            } catch (Exception error) {
+                throw new IllegalStateException("question seed failed", error);
+            } finally {
+                database.endTransaction();
+            }
+        }
+
+        Question find(String id) {
+            List<Question> rows = query("q.id = ?", new String[]{id}, "q.round, q.id", 1);
+            return rows.isEmpty() ? null : rows.get(0);
+        }
+
+        List<Question> search(String query, String status, int limit) {
+            List<String> args = new ArrayList<>();
+            StringBuilder where = new StringBuilder("1=1");
+            String normalized = normalize(query);
+            if (!normalized.isEmpty()) {
+                where.append(" AND q.search LIKE ?");
+                args.add("%" + normalized + "%");
+            }
+            if (FILTER_STARRED.equals(status)) {
+                where.append(" AND IFNULL(s.starred,0)=1");
+            } else if (!FILTER_ALL.equals(status)) {
+                where.append(" AND IFNULL(s.status,'unseen')=?");
+                args.add(status);
+            }
+            return query(where.toString(), args.toArray(new String[0]), "q.round, q.id", limit);
+        }
+
+        List<Question> recommended() {
+            return query("(q.subject & 1) != 0 AND IFNULL(s.status,'unseen') != 'done'", new String[0], "CASE IFNULL(s.status,'unseen') WHEN 'weak' THEN 0 ELSE 1 END, q.keyword, q.round", 2);
+        }
+
+        List<KeywordRow> frequentRows(int subject, int limit) {
+            SQLiteDatabase database = getReadableDatabase();
+            Cursor cursor = database.rawQuery(
+                    "SELECT keyword, COUNT(*) AS c FROM questions WHERE (subject & ?) != 0 GROUP BY keyword HAVING c >= 1 ORDER BY c DESC, keyword LIMIT ?",
+                    new String[]{String.valueOf(subject), String.valueOf(limit)}
+            );
+            List<KeywordRow> rows = new ArrayList<>();
+            try {
+                while (cursor.moveToNext()) {
+                    KeywordRow row = new KeywordRow();
+                    row.keyword = cursor.getString(0);
+                    row.count = cursor.getInt(1);
+                    rows.add(row);
+                }
+            } finally {
+                cursor.close();
+            }
+            return rows;
+        }
+
+        int subjectCount(int subject) {
+            return scalarInt(getReadableDatabase(), "SELECT COUNT(*) FROM questions WHERE (subject & " + subject + ") != 0");
+        }
+
+        Stats stats() {
+            SQLiteDatabase database = getReadableDatabase();
+            Stats stats = new Stats();
+            stats.total = scalarInt(database, "SELECT COUNT(*) FROM questions");
+            stats.done = stateCount(FILTER_DONE);
+            stats.weak = stateCount(FILTER_WEAK);
+            stats.starred = scalarInt(database, "SELECT COUNT(*) FROM state WHERE starred=1");
+            stats.unseen = stats.total - stats.done - stats.weak;
+            return stats;
+        }
+
+        void setStatus(String id, String status) {
+            ContentValues values = stateValues(id);
+            values.put("status", status);
+            if (FILTER_DONE.equals(status)) {
+                values.put("reviewedAt", new SimpleDateFormat("yyyy-MM-dd", Locale.KOREA).format(new Date()));
+            }
+            getWritableDatabase().insertWithOnConflict("state", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+        }
+
+        void setStarred(String id, boolean starred) {
+            ContentValues values = stateValues(id);
+            values.put("starred", starred ? 1 : 0);
+            getWritableDatabase().insertWithOnConflict("state", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+        }
+
+        void setMemo(String id, String memo) {
+            ContentValues values = stateValues(id);
+            values.put("memo", memo);
+            getWritableDatabase().insertWithOnConflict("state", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+        }
+
+        private ContentValues stateValues(String id) {
+            Question existing = find(id);
+            ContentValues values = new ContentValues();
+            values.put("id", id);
+            values.put("status", existing == null ? FILTER_UNSEEN : existing.status);
+            values.put("starred", existing != null && existing.starred ? 1 : 0);
+            values.put("memo", existing == null ? "" : existing.memo);
+            return values;
+        }
+
+        private int stateCount(String status) {
+            Cursor cursor = getReadableDatabase().rawQuery("SELECT COUNT(*) FROM state WHERE status=?", new String[]{status});
+            try {
+                return cursor.moveToFirst() ? cursor.getInt(0) : 0;
+            } finally {
+                cursor.close();
+            }
+        }
+
+        private List<Question> query(String where, String[] args, String order, int limit) {
+            SQLiteDatabase database = getReadableDatabase();
+            String sql = "SELECT q.id,q.round,q.category,q.keyword,q.question,IFNULL(s.status,'unseen'),IFNULL(s.starred,0),IFNULL(s.memo,''),(SELECT COUNT(*) FROM questions k WHERE k.keyword=q.keyword) " +
+                    "FROM questions q LEFT JOIN state s ON s.id=q.id WHERE " + where + " ORDER BY " + order + " LIMIT " + limit;
+            Cursor cursor = database.rawQuery(sql, args);
+            List<Question> rows = new ArrayList<>();
+            try {
+                while (cursor.moveToNext()) rows.add(readQuestion(cursor));
+            } finally {
+                cursor.close();
+            }
+            return rows;
+        }
+
+        private Question readQuestion(Cursor cursor) {
+            Question q = new Question();
+            q.id = cursor.getString(0);
+            q.round = cursor.getString(1);
+            q.category = cursor.getString(2);
+            q.keyword = cursor.getString(3);
+            q.question = cursor.getString(4);
+            q.status = cursor.getString(5);
+            q.starred = cursor.getInt(6) == 1;
+            q.memo = cursor.getString(7);
+            q.frequency = cursor.getInt(8);
+            return q;
+        }
+
+        private int assetCount() {
+            try {
+                return readAssetQuestions().length();
+            } catch (Exception error) {
+                return -1;
+            }
+        }
+
+        private JSONArray readAssetQuestions() throws Exception {
+            InputStream input = getAssets().open("questions.json");
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) out.write(buffer, 0, read);
+            return new JSONArray(out.toString("UTF-8"));
+        }
+
+        private int scalarInt(SQLiteDatabase database, String sql) {
+            Cursor cursor = database.rawQuery(sql, null);
+            try {
+                return cursor.moveToFirst() ? cursor.getInt(0) : 0;
+            } finally {
+                cursor.close();
+            }
+        }
+
+        private String normalizeKeyword(String keyword) {
+            if ("고장파급방지장치".equals(keyword)) return "SPS";
+            if ("전력계통안정화장치".equals(keyword)) return "PSS";
+            if ("태양광인버터효율".equals(keyword)) return "태양광인버터";
+            return keyword == null || keyword.length() == 0 ? "기타" : keyword;
         }
     }
 }
