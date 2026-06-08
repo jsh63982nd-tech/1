@@ -190,6 +190,7 @@ public class MainActivity extends Activity {
     private QuestionAdapter questionAdapter;
     private TextView questionCount;
     private JSONObject referenceIndex = new JSONObject();
+    private JSONObject answerKeywordIndex = new JSONObject();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -197,6 +198,7 @@ public class MainActivity extends Activity {
         db = new Db(this);
         db.seedIfNeeded();
         loadReferences();
+        loadAnswerKeywords();
         buildShell();
         showHome();
     }
@@ -483,6 +485,26 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void loadAnswerKeywords() {
+        try {
+            InputStream input = getAssets().open("answer-keywords.json");
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            input.close();
+            JSONObject payload = new JSONObject(out.toString("UTF-8"));
+            JSONObject keywords = payload.optJSONObject("keywords");
+            if (keywords != null) {
+                answerKeywordIndex = keywords;
+            }
+        } catch (Exception ignored) {
+            answerKeywordIndex = new JSONObject();
+        }
+    }
+
     private String referenceText(String questionId) {
         JSONArray rows = referenceIndex.optJSONArray(questionId);
         if (rows == null || rows.length() == 0) {
@@ -528,6 +550,15 @@ public class MainActivity extends Activity {
     }
 
     private String studyKeywords(Question q) {
+        JSONArray rows = answerKeywordIndex.optJSONArray(q.id);
+        if (rows != null && rows.length() > 0) {
+            List<String> terms = new ArrayList<>();
+            for (int i = 0; i < rows.length(); i++) {
+                String term = rows.optString(i);
+                if (term.length() > 0) terms.add(term);
+            }
+            return String.join(" · ", terms);
+        }
         Set<String> terms = new HashSet<>();
         terms.add(q.keyword);
         String text = q.question + " " + q.keyword;
