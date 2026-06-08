@@ -189,12 +189,14 @@ public class MainActivity extends Activity {
     private String frequentSubject = SUBJECT_NAMES[0];
     private QuestionAdapter questionAdapter;
     private TextView questionCount;
+    private JSONObject referenceIndex = new JSONObject();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         db = new Db(this);
         db.seedIfNeeded();
+        loadReferences();
         buildShell();
         showHome();
     }
@@ -351,6 +353,12 @@ public class MainActivity extends Activity {
 
         body.addView(section("답안 키워드"));
         body.addView(card(studyKeywords(q)));
+
+        String reference = referenceText(q.id);
+        if (reference.length() > 0) {
+            body.addView(section("참고 페이지"));
+            body.addView(card(reference));
+        }
     }
 
     private void showFrequent() {
@@ -453,6 +461,56 @@ public class MainActivity extends Activity {
         }
         input.close();
         db.importStateJson(new JSONObject(out.toString("UTF-8")));
+    }
+
+    private void loadReferences() {
+        try {
+            InputStream input = getAssets().open("references.json");
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            input.close();
+            JSONObject payload = new JSONObject(out.toString("UTF-8"));
+            JSONObject refs = payload.optJSONObject("references");
+            if (refs != null) {
+                referenceIndex = refs;
+            }
+        } catch (Exception ignored) {
+            referenceIndex = new JSONObject();
+        }
+    }
+
+    private String referenceText(String questionId) {
+        JSONArray rows = referenceIndex.optJSONArray(questionId);
+        if (rows == null || rows.length() == 0) {
+            return "";
+        }
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < rows.length(); i++) {
+            JSONObject row = rows.optJSONObject(i);
+            if (row == null) continue;
+            if (text.length() > 0) text.append("\n\n");
+            int start = row.optInt("pdfPageStart");
+            int end = row.optInt("pdfPageEnd", start);
+            text.append(row.optString("book", "참고자료"))
+                    .append(" · PDF p.")
+                    .append(start);
+            if (end > start) {
+                text.append("~").append(end);
+            }
+            JSONArray terms = row.optJSONArray("terms");
+            if (terms != null && terms.length() > 0) {
+                text.append("\n매칭 키워드: ");
+                for (int t = 0; t < terms.length(); t++) {
+                    if (t > 0) text.append(" · ");
+                    text.append(terms.optString(t));
+                }
+            }
+        }
+        return text.toString();
     }
 
     private void addFilter(LinearLayout filters, String value, String label) {
