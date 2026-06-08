@@ -3,10 +3,12 @@ package kr.powerexam.review;
 import android.app.Activity;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.Intent;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.graphics.Color;
+import android.net.Uri;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.text.Editable;
@@ -23,12 +25,14 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -38,6 +42,8 @@ import java.util.Locale;
 import java.util.Set;
 
 public class MainActivity extends Activity {
+    private static final int REQUEST_EXPORT_BACKUP = 1001;
+    private static final int REQUEST_IMPORT_BACKUP = 1002;
     private static final String FILTER_ALL = "all";
     private static final String FILTER_UNSEEN = "unseen";
     private static final String FILTER_WEAK = "weak";
@@ -261,6 +267,69 @@ public class MainActivity extends Activity {
         body.addView(card("전체 " + stats.total + "\n미회독 " + stats.unseen + "\n완료 " + stats.done + "\n취약 " + stats.weak + "\n별표 " + stats.starred));
         body.addView(section("과목 추정"));
         body.addView(card("송배전공학 " + db.subjectCount(SUBJECT_SONG) + "문제\n발전공학 " + db.subjectCount(SUBJECT_GEN) + "문제\n계통공학 " + db.subjectCount(SUBJECT_GRID) + "문제"));
+        body.addView(section("백업"));
+        body.addView(actionButton("회독 기록 백업 내보내기", v -> exportBackup()));
+        body.addView(actionButton("회독 기록 백업 가져오기", v -> importBackup()));
+    }
+
+    private void exportBackup() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        intent.putExtra(Intent.EXTRA_TITLE, "power-exam-review-backup.json");
+        startActivityForResult(intent, REQUEST_EXPORT_BACKUP);
+    }
+
+    private void importBackup() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        startActivityForResult(intent, REQUEST_IMPORT_BACKUP);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        Uri uri = data.getData();
+        try {
+            if (requestCode == REQUEST_EXPORT_BACKUP) {
+                writeBackup(uri);
+                Toast.makeText(this, "백업을 저장했습니다.", Toast.LENGTH_SHORT).show();
+            } else if (requestCode == REQUEST_IMPORT_BACKUP) {
+                readBackup(uri);
+                Toast.makeText(this, "백업을 가져왔습니다.", Toast.LENGTH_SHORT).show();
+                showStats();
+            }
+        } catch (Exception error) {
+            Toast.makeText(this, "백업 처리에 실패했습니다.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void writeBackup(Uri uri) throws Exception {
+        OutputStream output = getContentResolver().openOutputStream(uri);
+        if (output == null) {
+            throw new IllegalStateException("backup output unavailable");
+        }
+        output.write(db.exportStateJson().toString().getBytes("UTF-8"));
+        output.close();
+    }
+
+    private void readBackup(Uri uri) throws Exception {
+        InputStream input = getContentResolver().openInputStream(uri);
+        if (input == null) {
+            throw new IllegalStateException("backup input unavailable");
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            out.write(buffer, 0, read);
+        }
+        input.close();
+        db.importStateJson(new JSONObject(out.toString("UTF-8")));
     }
 
     private void addFilter(LinearLayout filters, String value, String label) {
@@ -516,12 +585,17 @@ public class MainActivity extends Activity {
 
         void seedIfNeeded() {
             SQLiteDatabase database = getWritableDatabase();
+            JSONArray array;
+            try {
+                array = readAssetQuestions();
+            } catch (Exception error) {
+                throw new IllegalStateException("question asset read failed", error);
+            }
             int existing = scalarInt(database, "SELECT COUNT(*) FROM questions");
-            if (existing == assetCount()) return;
+            if (existing == array.length()) return;
             database.beginTransaction();
             try {
                 database.execSQL("DELETE FROM questions");
-                JSONArray array = readAssetQuestions();
                 for (int i = 0; i < array.length(); i++) {
                     JSONObject obj = array.getJSONObject(i);
                     String id = obj.optString("id");
@@ -632,13 +706,111 @@ public class MainActivity extends Activity {
         }
 
         private ContentValues stateValues(String id) {
-            Question existing = find(id);
+            ContentValues existing = existingStateValues(id);
             ContentValues values = new ContentValues();
             values.put("id", id);
-            values.put("status", existing == null ? FILTER_UNSEEN : existing.status);
-            values.put("starred", existing != null && existing.starred ? 1 : 0);
-            values.put("memo", existing == null ? "" : existing.memo);
+            values.put("status", existing.getAsString("status"));
+            values.put("starred", existing.getAsInteger("starred"));
+            values.put("memo", existing.getAsString("memo"));
+            String reviewedAt = existing.getAsString("reviewedAt");
+            if (reviewedAt != null) {
+                values.put("reviewedAt", reviewedAt);
+            }
             return values;
+        }
+
+        private ContentValues existingStateValues(String id) {
+            ContentValues values = new ContentValues();
+            values.put("status", FILTER_UNSEEN);
+            values.put("starred", 0);
+            values.put("memo", "");
+            Cursor cursor = getReadableDatabase().rawQuery("SELECT status,starred,memo,reviewedAt FROM state WHERE id=?", new String[]{id});
+            try {
+                if (cursor.moveToFirst()) {
+                    values.put("status", cursor.getString(0));
+                    values.put("starred", cursor.getInt(1));
+                    values.put("memo", cursor.getString(2));
+                    if (!cursor.isNull(3)) {
+                        values.put("reviewedAt", cursor.getString(3));
+                    }
+                }
+            } finally {
+                cursor.close();
+            }
+            return values;
+        }
+
+        JSONObject exportStateJson() throws Exception {
+            JSONObject root = new JSONObject();
+            JSONArray states = new JSONArray();
+            Cursor cursor = getReadableDatabase().rawQuery("SELECT id,status,starred,memo,reviewedAt FROM state ORDER BY id", null);
+            try {
+                while (cursor.moveToNext()) {
+                    JSONObject row = new JSONObject();
+                    row.put("id", cursor.getString(0));
+                    row.put("status", cursor.getString(1));
+                    row.put("starred", cursor.getInt(2) == 1);
+                    row.put("memo", cursor.getString(3));
+                    if (!cursor.isNull(4)) {
+                        row.put("reviewedAt", cursor.getString(4));
+                    }
+                    states.put(row);
+                }
+            } finally {
+                cursor.close();
+            }
+            root.put("version", 1);
+            root.put("exportedAt", new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.KOREA).format(new Date()));
+            root.put("states", states);
+            return root;
+        }
+
+        void importStateJson(JSONObject root) throws Exception {
+            JSONArray states = root.optJSONArray("states");
+            if (states == null) {
+                states = root.optJSONArray("questions");
+            }
+            if (states == null) {
+                throw new IllegalArgumentException("backup states missing");
+            }
+            SQLiteDatabase database = getWritableDatabase();
+            database.beginTransaction();
+            try {
+                database.delete("state", null, null);
+                for (int i = 0; i < states.length(); i++) {
+                    JSONObject row = states.getJSONObject(i);
+                    String id = row.optString("id");
+                    if (!questionExists(database, id)) {
+                        continue;
+                    }
+                    ContentValues values = new ContentValues();
+                    String status = row.optString("status", FILTER_UNSEEN);
+                    if (!FILTER_DONE.equals(status) && !FILTER_WEAK.equals(status)) {
+                        status = FILTER_UNSEEN;
+                    }
+                    values.put("id", id);
+                    values.put("status", status);
+                    values.put("starred", row.optBoolean("starred", row.optInt("starred", 0) == 1) ? 1 : 0);
+                    values.put("memo", row.optString("memo", ""));
+                    String reviewedAt = row.optString("reviewedAt", row.optString("date", ""));
+                    if (reviewedAt.length() > 0) {
+                        values.put("reviewedAt", reviewedAt);
+                    }
+                    database.insertWithOnConflict("state", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+                }
+                database.setTransactionSuccessful();
+            } finally {
+                database.endTransaction();
+            }
+        }
+
+        private boolean questionExists(SQLiteDatabase database, String id) {
+            Cursor cursor = database.rawQuery("SELECT 1 FROM questions WHERE id=? LIMIT 1", new String[]{id});
+            try {
+                return cursor.moveToFirst();
+            } finally {
+                cursor.close();
+            }
         }
 
         private int stateCount(String status) {
@@ -676,14 +848,6 @@ public class MainActivity extends Activity {
             q.memo = cursor.getString(7);
             q.frequency = cursor.getInt(8);
             return q;
-        }
-
-        private int assetCount() {
-            try {
-                return readAssetQuestions().length();
-            } catch (Exception error) {
-                return -1;
-            }
         }
 
         private JSONArray readAssetQuestions() throws Exception {
