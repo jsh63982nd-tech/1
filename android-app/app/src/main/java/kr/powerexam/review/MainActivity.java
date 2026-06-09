@@ -523,6 +523,12 @@ public class MainActivity extends Activity {
             if (end > start) {
                 text.append("~").append(end);
             }
+            String confidence = row.optString("confidence");
+            if ("high".equals(confidence)) {
+                text.append("\n신뢰도: 높음");
+            } else if ("medium".equals(confidence)) {
+                text.append("\n신뢰도: 보통");
+            }
             JSONArray terms = row.optJSONArray("terms");
             if (terms != null && terms.length() > 0) {
                 text.append("\n매칭 키워드: ");

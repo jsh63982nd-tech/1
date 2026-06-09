@@ -23,6 +23,7 @@ BOOKS = [
         "path": Path(r"C:\Users\오승엽\Documents\카카오톡 받은 파일\최신 송배전공학_260607_094041.pdf"),
         "min_page": 16,
         "max_page": 582,
+        "strong_terms": ["송전", "배전", "변전", "선로", "케이블", "전선", "피뢰", "접지", "차단", "계전", "보호", "고장", "단락", "지락", "코로나", "절연", "전압강하", "분산형전원", "계통연계"],
         "terms": ["송전", "배전", "변전", "선로", "케이블", "전선", "전압", "전류", "전력", "피뢰", "접지", "차단", "계전", "보호", "고장", "단락", "지락", "코로나", "절연", "전압강하", "분산형전원", "계통연계"],
     },
     {
@@ -32,6 +33,7 @@ BOOKS = [
         "path": Path(r"C:\Users\오승엽\Downloads\전력계통공학.pdf"),
         "min_page": 15,
         "max_page": 620,
+        "strong_terms": ["계통", "조류", "안정도", "주파수", "무효전력", "유효전력", "경제급전", "ELD", "AFC", "HVDC", "전력시장", "예비력", "수급", "수요관리"],
         "terms": ["계통", "조류", "안정도", "주파수", "무효전력", "유효전력", "전압", "전류", "송전", "발전기", "부하", "고장", "단락", "경제급전", "ELD", "AFC", "HVDC", "전력시장", "예비력"],
     },
     {
@@ -41,6 +43,7 @@ BOOKS = [
         "path": Path(r"C:\Users\오승엽\Downloads\최신 발전공학.pdf"),
         "min_page": 11,
         "max_page": 608,
+        "strong_terms": ["발전", "발전소", "수력", "수차", "낙차", "유량", "화력", "기력", "보일러", "터빈", "증기터빈", "원자력", "원자로", "핵연료", "태양광", "풍력", "연료전지", "ESS", "에너지저장", "IGCC", "랭킨", "열효율"],
         "terms": ["발전", "발전소", "수력", "수차", "낙차", "유량", "화력", "기력", "보일러", "터빈", "증기터빈", "원자력", "원자로", "핵연료", "태양광", "풍력", "연료전지", "ESS", "에너지저장"],
     },
 ]
@@ -49,6 +52,8 @@ STOP = {
     "설명", "제시", "대하여", "관하여", "다음", "아래", "각각", "비교", "정의", "종류", "특징",
     "장점", "단점", "문제점", "대책", "방법", "방식", "기준", "기술", "공학", "전력", "문제",
 }
+
+COMMON_TERMS = {"전력", "전압", "전류", "발전", "송전", "계통", "또한", "정리"}
 
 
 def normalize(value):
@@ -126,11 +131,11 @@ def subject_books(question):
     text = f"{question.get('category','')} {question.get('keyword','')} {question.get('question','')}"
     compact = normalize(text)
     selected = []
-    if any(normalize(t) in compact for t in BOOKS[0]["terms"]):
+    if any(normalize(t) in compact for t in BOOKS[0]["strong_terms"]):
         selected.append("song")
-    if any(normalize(t) in compact for t in BOOKS[1]["terms"]):
+    if any(normalize(t) in compact for t in BOOKS[1]["strong_terms"]):
         selected.append("grid")
-    if any(normalize(t) in compact for t in BOOKS[2]["terms"]):
+    if any(normalize(t) in compact for t in BOOKS[2]["strong_terms"]):
         selected.append("generation")
     if not selected:
         selected.append("song")
@@ -147,21 +152,32 @@ def score_page(page, question, book):
     norm_page = page["norm"]
     score = 0
     hits = []
+    strong_hits = 0
     if norm_keyword and norm_keyword in norm_page:
         score += 80
         hits.append(keyword)
+        strong_hits += 1
     for term in terms:
         nterm = normalize(term)
         if len(nterm) < 2:
             continue
         if nterm in norm_page:
-            score += 12 + min(len(nterm), 10)
+            term_score = 12 + min(len(nterm), 10)
+            if term in COMMON_TERMS:
+                term_score = 4
+            else:
+                strong_hits += 1
+            score += term_score
             hits.append(term)
     for term in book["terms"]:
         nterm = normalize(term)
         if nterm in norm_page and nterm in normalize(f"{keyword} {qtext}"):
-            score += 18
+            score += 6 if term in COMMON_TERMS else 18
+            if term not in COMMON_TERMS:
+                strong_hits += 1
             hits.append(term)
+    if strong_hits == 0:
+        return 0, []
     return score, hits
 
 
@@ -172,7 +188,7 @@ def best_ranges(question, pages_by_book):
         scored = []
         for page in pages_by_book[book_id]:
             score, hits = score_page(page, question, book)
-            if score > 0:
+            if score >= 60:
                 scored.append((score, page["page"], hits))
         if not scored:
             continue
@@ -189,6 +205,7 @@ def best_ranges(question, pages_by_book):
                 "pdfPageStart": max(1, page - 1),
                 "pdfPageEnd": page + 1,
                 "score": score,
+                "confidence": "high" if score >= 120 else "medium",
                 "terms": terms,
             })
             break
