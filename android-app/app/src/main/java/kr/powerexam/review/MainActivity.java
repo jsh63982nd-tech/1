@@ -191,6 +191,7 @@ public class MainActivity extends Activity {
     private TextView questionCount;
     private JSONObject referenceIndex = new JSONObject();
     private JSONObject answerKeywordIndex = new JSONObject();
+    private JSONObject summaryPointIndex = new JSONObject();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -199,6 +200,7 @@ public class MainActivity extends Activity {
         db.seedIfNeeded();
         loadReferences();
         loadAnswerKeywords();
+        loadSummaryPoints();
         buildShell();
         showHome();
     }
@@ -356,6 +358,12 @@ public class MainActivity extends Activity {
         body.addView(section("답안 키워드"));
         body.addView(card(studyKeywords(q)));
 
+        String summary = summaryText(q.id);
+        if (summary.length() > 0) {
+            body.addView(section("교재 요약/암기 포인트"));
+            body.addView(card(summary));
+        }
+
         String reference = referenceText(q.id);
         if (reference.length() > 0) {
             body.addView(section("참고 페이지"));
@@ -503,6 +511,41 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {
             answerKeywordIndex = new JSONObject();
         }
+    }
+
+    private void loadSummaryPoints() {
+        try {
+            InputStream input = getAssets().open("summary-points.json");
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            input.close();
+            JSONObject payload = new JSONObject(out.toString("UTF-8"));
+            JSONObject summaries = payload.optJSONObject("summaries");
+            if (summaries != null) {
+                summaryPointIndex = summaries;
+            }
+        } catch (Exception ignored) {
+            summaryPointIndex = new JSONObject();
+        }
+    }
+
+    private String summaryText(String questionId) {
+        JSONArray rows = summaryPointIndex.optJSONArray(questionId);
+        if (rows == null || rows.length() == 0) {
+            return "";
+        }
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < rows.length(); i++) {
+            String point = rows.optString(i);
+            if (point.length() == 0) continue;
+            if (text.length() > 0) text.append("\n");
+            text.append(i + 1).append(". ").append(point);
+        }
+        return text.toString();
     }
 
     private String referenceText(String questionId) {
