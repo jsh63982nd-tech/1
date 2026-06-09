@@ -75,6 +75,7 @@ def split_examples(text):
         body = clean(cleaned[start:end])
         if len(body) < 14:
             continue
+        body = re.sub(r"^(?:aris\s*=\s*|및\s+)", "", body, flags=re.IGNORECASE).strip()
         if any(bad in body for bad in ["연습문제", "해답", "찾아보기", "부록", "차례", "목차"]):
             continue
         stop = re.search(r"(?:\?|구하여라\.?|설명하여라\.?|계산하여라\.?|비교하여라\.?|열거하여라\.?)", body)
@@ -87,18 +88,48 @@ def split_examples(text):
     return rows
 
 
-def split_grid_examples(text, page):
+def grid_number(number, chapter):
+    number = str(number).replace(".", "-")
+    if "-" in number:
+        return number
+    chapter_match = re.match(r"([0-9]{1,2})장", chapter or "")
+    chapter_no = chapter_match.group(1) if chapter_match else ""
+    if chapter_no and number == chapter_no:
+        return f"{chapter_no}-1"
+    if chapter_no and number.startswith(chapter_no) and len(number) == len(chapter_no) + 1:
+        return f"{chapter_no}-{number[len(chapter_no):]}"
+    if chapter_no and number.startswith(chapter_no) and len(number) == len(chapter_no) + 2:
+        tail = number[len(chapter_no):]
+        if tail.startswith("7"):
+            tail = "1" + tail[1:]
+        return f"{chapter_no}-{tail}"
+    if not chapter_no and number.isdigit() and len(number) == 1:
+        return f"{number}-1"
+    if not chapter_no and number.isdigit() and len(number) == 2:
+        return f"{number[0]}-{number[1]}"
+    if not chapter_no and number.isdigit() and len(number) == 3 and number[1] == "7":
+        return f"{number[0]}-1{number[2]}"
+    return number
+
+
+def split_grid_examples(text, page, chapter):
     raw_lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
     lines = [clean(line) for line in raw_lines]
-    word_marker = re.compile(r"^[^가-힣A-Za-z0-9]*(?:[@©®]\s*)?(?:예제|에제|여제|이제)\s*([0-9]{1,2}[-.][0-9]{1,2})\b")
-    alias_marker = re.compile(r"^[^가-힣A-Za-z0-9]*[@©®]\s*(?:WA|wa|Wi|wi|WI|Wl|wl|wil|Fi|FH|PH|Pi|oI|OF|MI|Mi|21|4)\s*([0-9]{1,2}[-.][0-9]{1,2})\b")
+    word_marker = re.compile(r"^[^가-힣A-Za-z0-9]*(?:[@©®]\s*)?(?:예제|에제|여제|이제)\s*([0-9]{1,3}(?:[-.][0-9]{1,2})?)(?![0-9.\-])")
+    alias_marker = re.compile(r"^[^가-힣A-Za-z0-9]*[@©®]\s*(?:A|WA|wa|Wi|wi|WI|Wl|wl|wil|Fi|FH|PH|Pi|oI|OF|MI|Mi|21|4)\s*([0-9]{1,3}(?:[-.][0-9]{1,2})?)(?![0-9.\-])")
     rows = []
     starts = []
     for idx, line in enumerate(raw_lines):
-        match = word_marker.search(line) or alias_marker.search(line)
+        match = word_marker.search(line)
+        source = "word"
+        if not match:
+            match = alias_marker.search(line)
+            source = "alias"
         if not match:
             continue
-        starts.append((idx, match.group(1), line[match.end():]))
+        if source == "word" and line[match.end():].lstrip().startswith("에서"):
+            continue
+        starts.append((idx, grid_number(match.group(1), chapter), line[match.end():]))
     for pos, (idx, number, remainder) in enumerate(starts):
         end_idx = starts[pos + 1][0] if pos + 1 < len(starts) else min(len(lines), idx + 36)
         body_lines = [remainder] + lines[idx + 1:end_idx]
@@ -106,6 +137,7 @@ def split_grid_examples(text, page):
         body = re.sub(r"^(?:[)\]}|[JjilIl]+\s*)+", "", body).strip()
         if len(body) < 14:
             continue
+        body = re.sub(r"^(?:aris\s*=\s*|및\s+)", "", body, flags=re.IGNORECASE).strip()
         if any(bad in body for bad in ["연습문제", "해답", "찾아보기", "부록", "차례", "목차"]):
             continue
         stop = re.search(r"(?:\?|구하여라\.?|설명하여라\.?|계산하여라\.?|비교하여라\.?|열거하여라\.?)", body)
@@ -163,9 +195,8 @@ def extract_book(book):
         chapter = chapter_from_text(text) or last_chapter
         if chapter:
             last_chapter = chapter
-        if not exercise_page_allowed(text):
-            continue
-        if is_exercise_page(text):
+        allowed_page = exercise_page_allowed(text)
+        if allowed_page and is_exercise_page(text):
             for seq, (number, question) in enumerate(split_numbered(text), start=1):
                 formula, review = formula_flags(question)
                 rows.append({
@@ -182,7 +213,7 @@ def extract_book(book):
                     "reviewNeeded": review,
                 })
         seen_examples = set()
-        example_rows = split_grid_examples(text, page) if book["id"] == "grid" else split_examples(text)
+        example_rows = split_grid_examples(text, page, chapter or last_chapter) if book["id"] == "grid" else split_examples(text)
         for seq, (number, question) in enumerate(example_rows, start=1):
             key = (number, question[:60])
             if key in seen_examples:
