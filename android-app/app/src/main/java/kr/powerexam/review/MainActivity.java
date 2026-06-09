@@ -193,6 +193,8 @@ public class MainActivity extends Activity {
     private JSONObject answerKeywordIndex = new JSONObject();
     private JSONObject summaryPointIndex = new JSONObject();
     private JSONObject ocrQualityReport = new JSONObject();
+    private final List<TextbookExercise> textbookExercises = new ArrayList<>();
+    private String exerciseSubject = "전체";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -203,6 +205,7 @@ public class MainActivity extends Activity {
         loadAnswerKeywords();
         loadSummaryPoints();
         loadOcrQualityReport();
+        loadTextbookExercises();
         buildShell();
         showHome();
     }
@@ -223,6 +226,7 @@ public class MainActivity extends Activity {
         nav.addView(navButton("홈", v -> showHome()));
         nav.addView(navButton("문제", v -> showQuestions()));
         nav.addView(navButton("빈출", v -> showFrequent()));
+        nav.addView(navButton("교재문제", v -> showTextbookExercises()));
         nav.addView(navButton("통계", v -> showStats()));
         navScroll.addView(nav);
         root.addView(navScroll);
@@ -393,6 +397,60 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void showTextbookExercises() {
+        LinearLayout body = paddedColumn();
+        screen.removeAllViews();
+        screen.addView(wrapScroll(body));
+
+        body.addView(section("교재 연습문제"));
+        body.addView(muted("3권 교재의 단원 말미 연습문제 OCR 추출본입니다. 수식 문제는 OCR 오차가 있을 수 있습니다."));
+
+        LinearLayout subjects = row();
+        String[] filters = {"전체", "송배전공학", "계통공학", "발전공학"};
+        for (String filter : filters) {
+            subjects.addView(smallButton(filter + (filter.equals(exerciseSubject) ? " *" : ""), v -> {
+                exerciseSubject = ((Button) v).getText().toString().replace(" *", "");
+                showTextbookExercises();
+            }));
+        }
+        body.addView(subjects);
+
+        int shown = 0;
+        for (TextbookExercise item : textbookExercises) {
+            if (!"전체".equals(exerciseSubject) && !exerciseSubject.equals(item.subject)) continue;
+            body.addView(exerciseButton(item));
+            shown++;
+            if (shown >= 160) break;
+        }
+        body.addView(muted(shown + "문제 표시" + (shown >= 160 ? " · 과목을 선택하면 더 좁힐 수 있습니다" : "")));
+    }
+
+    private Button exerciseButton(TextbookExercise item) {
+        String label = item.subject + " · " + item.book + " · PDF p." + item.page + "\n" +
+                item.chapter + " · " + item.number + "번 · " + item.keyword + "\n" + cleanQuestion(item.question);
+        Button button = actionButton(label, v -> showTextbookExerciseDetail(item.id));
+        button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        return button;
+    }
+
+    private void showTextbookExerciseDetail(String id) {
+        TextbookExercise item = findTextbookExercise(id);
+        if (item == null) {
+            showTextbookExercises();
+            return;
+        }
+        LinearLayout body = paddedColumn();
+        screen.removeAllViews();
+        screen.addView(wrapScroll(body));
+
+        body.addView(actionButton("교재문제 목록으로", v -> showTextbookExercises()));
+        body.addView(section(item.subject + " 연습문제"));
+        body.addView(muted(item.book + " · " + item.chapter + " · PDF p." + item.page + " · " + item.number + "번"));
+        body.addView(learningCard(cleanQuestion(item.question), 18, true));
+        body.addView(section("핵심 키워드"));
+        body.addView(learningCard(item.keyword, 15, false));
+    }
+
     private void showStats() {
         LinearLayout body = paddedColumn();
         screen.removeAllViews();
@@ -403,6 +461,8 @@ public class MainActivity extends Activity {
         body.addView(card("전체 " + stats.total + "\n미회독 " + stats.unseen + "\n완료 " + stats.done + "\n취약 " + stats.weak + "\n별표 " + stats.starred));
         body.addView(section("과목 추정"));
         body.addView(card("송배전공학 " + db.subjectCount(SUBJECT_SONG) + "문제\n발전공학 " + db.subjectCount(SUBJECT_GEN) + "문제\n계통공학 " + db.subjectCount(SUBJECT_GRID) + "문제"));
+        body.addView(section("교재 연습문제"));
+        body.addView(card(textbookExercises.size() + "문제"));
         String ocr = ocrQualityText();
         if (ocr.length() > 0) {
             body.addView(section("OCR 품질"));
@@ -547,6 +607,45 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {
             ocrQualityReport = new JSONObject();
         }
+    }
+
+    private void loadTextbookExercises() {
+        textbookExercises.clear();
+        try {
+            InputStream input = getAssets().open("textbook-exercises.json");
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            input.close();
+            JSONArray rows = new JSONObject(out.toString("UTF-8")).optJSONArray("exercises");
+            if (rows == null) return;
+            for (int i = 0; i < rows.length(); i++) {
+                JSONObject row = rows.optJSONObject(i);
+                if (row == null) continue;
+                TextbookExercise item = new TextbookExercise();
+                item.id = row.optString("id");
+                item.book = row.optString("book");
+                item.subject = row.optString("subject");
+                item.chapter = row.optString("chapter");
+                item.page = row.optInt("page");
+                item.number = row.optInt("number");
+                item.keyword = row.optString("keyword");
+                item.question = row.optString("question");
+                textbookExercises.add(item);
+            }
+        } catch (Exception ignored) {
+            textbookExercises.clear();
+        }
+    }
+
+    private TextbookExercise findTextbookExercise(String id) {
+        for (TextbookExercise item : textbookExercises) {
+            if (item.id.equals(id)) return item;
+        }
+        return null;
     }
 
     private String ocrQualityText() {
@@ -948,6 +1047,17 @@ public class MainActivity extends Activity {
     private static class KeywordRow {
         String keyword;
         int count;
+    }
+
+    private static class TextbookExercise {
+        String id;
+        String book;
+        String subject;
+        String chapter;
+        int page;
+        int number;
+        String keyword;
+        String question;
     }
 
     private static class Stats {
