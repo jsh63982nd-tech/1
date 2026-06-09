@@ -192,6 +192,7 @@ public class MainActivity extends Activity {
     private JSONObject referenceIndex = new JSONObject();
     private JSONObject answerKeywordIndex = new JSONObject();
     private JSONObject summaryPointIndex = new JSONObject();
+    private JSONObject ocrQualityReport = new JSONObject();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -201,6 +202,7 @@ public class MainActivity extends Activity {
         loadReferences();
         loadAnswerKeywords();
         loadSummaryPoints();
+        loadOcrQualityReport();
         buildShell();
         showHome();
     }
@@ -401,6 +403,11 @@ public class MainActivity extends Activity {
         body.addView(card("전체 " + stats.total + "\n미회독 " + stats.unseen + "\n완료 " + stats.done + "\n취약 " + stats.weak + "\n별표 " + stats.starred));
         body.addView(section("과목 추정"));
         body.addView(card("송배전공학 " + db.subjectCount(SUBJECT_SONG) + "문제\n발전공학 " + db.subjectCount(SUBJECT_GEN) + "문제\n계통공학 " + db.subjectCount(SUBJECT_GRID) + "문제"));
+        String ocr = ocrQualityText();
+        if (ocr.length() > 0) {
+            body.addView(section("OCR 품질"));
+            body.addView(card(ocr));
+        }
         body.addView(section("백업"));
         body.addView(actionButton("회독 기록 백업 내보내기", v -> exportBackup()));
         body.addView(actionButton("회독 기록 백업 가져오기", v -> importBackup()));
@@ -524,6 +531,32 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {
             summaryPointIndex = new JSONObject();
         }
+    }
+
+    private void loadOcrQualityReport() {
+        try {
+            InputStream input = getAssets().open("ocr-quality-report.json");
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            input.close();
+            ocrQualityReport = new JSONObject(out.toString("UTF-8"));
+        } catch (Exception ignored) {
+            ocrQualityReport = new JSONObject();
+        }
+    }
+
+    private String ocrQualityText() {
+        int total = ocrQualityReport.optInt("totalPages");
+        if (total == 0) return "";
+        int before = ocrQualityReport.optInt("badBefore");
+        int after = ocrQualityReport.optInt("badAfter");
+        JSONArray improved = ocrQualityReport.optJSONArray("improved");
+        int improvedCount = improved == null ? 0 : improved.length();
+        return "검수 페이지 " + total + "\n저품질 페이지 " + before + " → " + after + "\n재OCR 개선 " + improvedCount + "페이지";
     }
 
     private String summaryText(String questionId) {
