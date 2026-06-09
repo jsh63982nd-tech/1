@@ -247,9 +247,10 @@ public class MainActivity extends Activity {
             showQuestions();
         }));
 
-        body.addView(section("추천 문제 2개"));
-        for (Question q : db.recommended()) {
-            body.addView(questionButton(q, v -> showDetail(q.id)));
+        body.addView(section("오늘 추천 5문제"));
+        body.addView(muted("기록이 없으면 빈출/핵심 키워드 기준, 기록이 쌓이면 취약/별표/복습 주기를 반영합니다."));
+        for (Question q : db.recommended(5)) {
+            body.addView(recommendationButton(q, v -> showDetail(q.id)));
         }
     }
 
@@ -598,6 +599,13 @@ public class MainActivity extends Activity {
         return button;
     }
 
+    private Button recommendationButton(Question q, View.OnClickListener listener) {
+        String reason = q.recommendationReason == null || q.recommendationReason.length() == 0 ? recommendationReason(q) : q.recommendationReason;
+        Button button = actionButton(q.round + " · " + q.keyword + " · " + statusLabel(q.status) + "\n추천 이유: " + reason + "\n" + q.displayQuestion, listener);
+        button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        return button;
+    }
+
     private String studyKeywords(Question q) {
         JSONArray rows = answerKeywordIndex.optJSONArray(q.id);
         if (rows != null && rows.length() > 0) {
@@ -622,6 +630,44 @@ public class MainActivity extends Activity {
         if (FILTER_DONE.equals(status)) return "완료";
         if (FILTER_WEAK.equals(status)) return "취약";
         return "미회독";
+    }
+
+    private String recommendationReason(Question q) {
+        List<String> reasons = new ArrayList<>();
+        if (FILTER_WEAK.equals(q.status)) {
+            reasons.add("취약 표시");
+        } else if (FILTER_UNSEEN.equals(q.status)) {
+            reasons.add("미회독");
+        } else if (FILTER_DONE.equals(q.status) && reviewAgeDays(q.reviewedAt) >= 7) {
+            reasons.add("복습 주기");
+        }
+        if (q.starred) reasons.add("별표");
+        if (q.frequency >= 3) reasons.add("빈출 키워드");
+        if (hasCoreKeyword(q)) reasons.add("핵심 키워드");
+        if (q.memo != null && q.memo.trim().length() > 0) reasons.add("메모 있음");
+        if (reasons.isEmpty()) reasons.add("기본 추천");
+        return String.join(" · ", reasons);
+    }
+
+    private boolean hasCoreKeyword(Question q) {
+        String text = q.keyword + " " + q.question;
+        String[] cores = {"보호", "계전", "전압", "고장", "단락", "접지", "피뢰", "안정도", "무효전력", "주파수", "발전기", "터빈", "보일러", "ESS", "분산형전원", "계통연계"};
+        for (String core : cores) {
+            if (text.contains(core)) return true;
+        }
+        return false;
+    }
+
+    private int reviewAgeDays(String reviewedAt) {
+        if (reviewedAt == null || reviewedAt.length() == 0) return 999;
+        try {
+            Date reviewed = new SimpleDateFormat("yyyy-MM-dd", Locale.KOREA).parse(reviewedAt);
+            if (reviewed == null) return 999;
+            long diff = new Date().getTime() - reviewed.getTime();
+            return (int) Math.max(0, diff / (1000L * 60L * 60L * 24L));
+        } catch (Exception ignored) {
+            return 999;
+        }
     }
 
     private String cleanQuestion(String value) {
@@ -815,8 +861,10 @@ public class MainActivity extends Activity {
         String status;
         boolean starred;
         String memo;
+        String reviewedAt;
         int frequency;
         String displayQuestion;
+        String recommendationReason;
     }
 
     private static class KeywordRow {
@@ -989,11 +1037,30 @@ public class MainActivity extends Activity {
             return query(where.toString(), args.toArray(new String[0]), order, limit);
         }
 
-        List<Question> recommended() {
-            return query("(q.subject & 1) != 0 AND IFNULL(s.status,'unseen') != 'done'", new String[0],
-                    "CASE IFNULL(s.status,'unseen') WHEN 'weak' THEN 0 ELSE 1 END, " +
-                            "CASE WHEN q.search LIKE '%보호%' OR q.search LIKE '%계전%' OR q.search LIKE '%전압%' OR q.search LIKE '%고장%' THEN 0 ELSE 1 END, " +
-                            "(SELECT COUNT(*) FROM questions k WHERE k.keyword=q.keyword) DESC, q.keyword, q.round", 2);
+        List<Question> recommended(int limit) {
+            String frequency = "(SELECT COUNT(*) FROM questions k WHERE k.keyword=q.keyword)";
+            String core = "(CASE WHEN q.search LIKE '%보호%' OR q.search LIKE '%계전%' OR q.search LIKE '%전압%' OR q.search LIKE '%고장%' OR q.search LIKE '%단락%' OR q.search LIKE '%접지%' OR q.search LIKE '%안정도%' OR q.search LIKE '%주파수%' THEN 45 ELSE 0 END)";
+            String recency = "(CASE WHEN IFNULL(s.status,'unseen')='done' AND IFNULL(s.reviewedAt,'') <> '' THEN CAST(julianday('now') - julianday(s.reviewedAt) AS INTEGER) * 4 ELSE 0 END)";
+            String score = "(" +
+                    "CASE IFNULL(s.status,'unseen') WHEN 'weak' THEN 180 WHEN 'unseen' THEN 100 WHEN 'done' THEN 10 ELSE 60 END + " +
+                    "IFNULL(s.starred,0) * 80 + " +
+                    "CASE WHEN IFNULL(s.memo,'') <> '' THEN 35 ELSE 0 END + " +
+                    "CASE WHEN " + frequency + " >= 5 THEN 70 WHEN " + frequency + " >= 3 THEN 45 WHEN " + frequency + " >= 2 THEN 25 ELSE 0 END + " +
+                    core + " + " + recency +
+                    ")";
+            List<Question> rows = query(
+                    "IFNULL(s.status,'unseen') != 'done' OR s.reviewedAt IS NULL OR s.reviewedAt <= date('now','-7 day')",
+                    new String[0],
+                    score + " DESC, CASE IFNULL(s.status,'unseen') WHEN 'weak' THEN 0 WHEN 'unseen' THEN 1 ELSE 2 END, q.round, q.id",
+                    limit
+            );
+            if (rows.isEmpty()) {
+                rows = query("1=1", new String[0], score + " DESC, q.round, q.id", limit);
+            }
+            for (Question q : rows) {
+                q.recommendationReason = recommendationReason(q);
+            }
+            return rows;
         }
 
         List<KeywordRow> frequentRows(int subject, int limit) {
@@ -1171,7 +1238,7 @@ public class MainActivity extends Activity {
 
         private List<Question> query(String where, String[] args, String order, int limit) {
             SQLiteDatabase database = getReadableDatabase();
-            String sql = "SELECT q.id,q.round,q.category,q.keyword,q.question,IFNULL(s.status,'unseen'),IFNULL(s.starred,0),IFNULL(s.memo,''),(SELECT COUNT(*) FROM questions k WHERE k.keyword=q.keyword) " +
+            String sql = "SELECT q.id,q.round,q.category,q.keyword,q.question,IFNULL(s.status,'unseen'),IFNULL(s.starred,0),IFNULL(s.memo,''),(SELECT COUNT(*) FROM questions k WHERE k.keyword=q.keyword),IFNULL(s.reviewedAt,'') " +
                     "FROM questions q LEFT JOIN state s ON s.id=q.id WHERE " + where + " ORDER BY " + order + " LIMIT " + limit;
             Cursor cursor = database.rawQuery(sql, args);
             List<Question> rows = new ArrayList<>();
@@ -1194,6 +1261,7 @@ public class MainActivity extends Activity {
             q.starred = cursor.getInt(6) == 1;
             q.memo = cursor.getString(7);
             q.frequency = cursor.getInt(8);
+            q.reviewedAt = cursor.getString(9);
             q.displayQuestion = cleanQuestion(q.question);
             return q;
         }
