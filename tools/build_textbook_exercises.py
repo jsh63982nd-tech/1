@@ -63,6 +63,30 @@ def split_numbered(text):
     return rows
 
 
+def split_examples(text):
+    cleaned = clean(text)
+    pattern = re.compile(r"(?:예제|에제|의제|이제)\s*([0-9]{1,2}(?:[.\-][0-9]{1,2})?)")
+    matches = list(pattern.finditer(cleaned))
+    rows = []
+    for idx, match in enumerate(matches):
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(cleaned)
+        number = match.group(1)
+        body = clean(cleaned[start:end])
+        if len(body) < 14:
+            continue
+        if any(bad in body for bad in ["연습문제", "해답", "찾아보기", "부록", "차례", "목차"]):
+            continue
+        stop = re.search(r"(?:\?|구하여라\.?|설명하여라\.?|계산하여라\.?|비교하여라\.?|열거하여라\.?)", body)
+        if stop:
+            body = body[:stop.end()]
+        body = clean(body)
+        if len(body) < 14:
+            continue
+        rows.append((number, body[:260]))
+    return rows
+
+
 def infer_keyword(question):
     terms = [
         "과전류", "보호계전", "변압기", "송전", "배전", "케이블", "전압", "전류", "접지", "피뢰",
@@ -87,6 +111,11 @@ def formula_flags(question):
     return formula, review
 
 
+def exercise_page_allowed(text):
+    compact = text.replace(" ", "")
+    return not any(bad in compact for bad in ["차례", "목차", "해답", "해탐", "부록", "찾아보기", "찾이보기"])
+
+
 def extract_book(book):
     page_dir = CACHE / book["id"] / "pages"
     rows = []
@@ -99,17 +128,34 @@ def extract_book(book):
         chapter = chapter_from_text(text) or last_chapter
         if chapter:
             last_chapter = chapter
-        if not is_exercise_page(text):
+        if not exercise_page_allowed(text):
             continue
-        for seq, (number, question) in enumerate(split_numbered(text), start=1):
+        if is_exercise_page(text):
+            for seq, (number, question) in enumerate(split_numbered(text), start=1):
+                formula, review = formula_flags(question)
+                rows.append({
+                    "id": f"tx-{book['id']}-{page:04d}-{seq:02d}",
+                    "kind": "exercise",
+                    "book": book["book"],
+                    "subject": book["subject"],
+                    "chapter": chapter or "단원 연습문제",
+                    "page": page,
+                    "number": str(number),
+                    "keyword": infer_keyword(question),
+                    "question": question,
+                    "formula": formula,
+                    "reviewNeeded": review,
+                })
+        for seq, (number, question) in enumerate(split_examples(text), start=1):
             formula, review = formula_flags(question)
             rows.append({
-                "id": f"tx-{book['id']}-{page:04d}-{seq:02d}",
+                "id": f"ex-{book['id']}-{page:04d}-{seq:02d}",
+                "kind": "example",
                 "book": book["book"],
                 "subject": book["subject"],
-                "chapter": chapter or "단원 연습문제",
+                "chapter": chapter or "단원 예제",
                 "page": page,
-                "number": number,
+                "number": str(number),
                 "keyword": infer_keyword(question),
                 "question": question,
                 "formula": formula,
@@ -124,14 +170,14 @@ def main():
         rows = extract_book(book)
         print(f"{book['book']} {len(rows)}", flush=True)
         all_rows.extend(rows)
-    payload = {"version": 1, "source": "textbook OCR exercise pages", "exercises": all_rows}
+    payload = {"version": 1, "source": "textbook OCR exercises and examples", "exercises": all_rows}
     OUTPUT.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     with FORMULA_REVIEW.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["id", "book", "subject", "chapter", "page", "number", "keyword", "formula", "reviewNeeded", "question"])
+        writer = csv.DictWriter(handle, fieldnames=["id", "kind", "book", "subject", "chapter", "page", "number", "keyword", "formula", "reviewNeeded", "question"])
         writer.writeheader()
         for row in all_rows:
             if row["formula"]:
-                writer.writerow({key: row.get(key, "") for key in writer.fieldnames})
+                writer.writerow({key: str(row.get(key, "")).strip() for key in writer.fieldnames})
     print(f"exercises {len(all_rows)} -> {OUTPUT}", flush=True)
     print(f"formula review {sum(1 for row in all_rows if row['formula'])} -> {FORMULA_REVIEW}", flush=True)
 

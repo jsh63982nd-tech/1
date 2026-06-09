@@ -195,6 +195,7 @@ public class MainActivity extends Activity {
     private JSONObject ocrQualityReport = new JSONObject();
     private final List<TextbookExercise> textbookExercises = new ArrayList<>();
     private String exerciseSubject = "전체";
+    private String exerciseKind = "전체";
     private boolean exerciseFormulaOnly = false;
     private boolean exerciseReviewOnly = false;
 
@@ -404,8 +405,8 @@ public class MainActivity extends Activity {
         screen.removeAllViews();
         screen.addView(wrapScroll(body));
 
-        body.addView(section("교재 연습문제"));
-        body.addView(muted("3권 교재의 단원 말미 연습문제 OCR 추출본입니다. 수식 문제는 OCR 오차가 있을 수 있습니다."));
+        body.addView(section("교재문제"));
+        body.addView(muted("3권 교재의 연습문제와 본문 예제 OCR 추출본입니다. 수식·그림형 문제는 검수필요로 따로 분류했습니다."));
 
         LinearLayout subjects = row();
         String[] filters = {"전체", "송배전공학", "계통공학", "발전공학"};
@@ -416,6 +417,15 @@ public class MainActivity extends Activity {
             }));
         }
         body.addView(subjects);
+        LinearLayout kinds = row();
+        String[] kindFilters = {"전체", "연습문제", "예제"};
+        for (String filter : kindFilters) {
+            kinds.addView(smallButton(filter + (filter.equals(exerciseKind) ? " *" : ""), v -> {
+                exerciseKind = ((Button) v).getText().toString().replace(" *", "");
+                showTextbookExercises();
+            }));
+        }
+        body.addView(kinds);
         LinearLayout types = row();
         types.addView(smallButton("수식형" + (exerciseFormulaOnly ? " *" : ""), v -> {
             exerciseFormulaOnly = !exerciseFormulaOnly;
@@ -430,20 +440,23 @@ public class MainActivity extends Activity {
         body.addView(types);
 
         int shown = 0;
+        int matching = 0;
         for (TextbookExercise item : textbookExercises) {
             if (!"전체".equals(exerciseSubject) && !exerciseSubject.equals(item.subject)) continue;
+            if (!"전체".equals(exerciseKind) && !exerciseKind.equals(exerciseKindLabel(item.kind))) continue;
             if (exerciseFormulaOnly && !item.formula) continue;
             if (exerciseReviewOnly && !item.reviewNeeded) continue;
+            matching++;
             body.addView(exerciseButton(item));
             shown++;
             if (shown >= 160) break;
         }
-        body.addView(muted(shown + "문제 표시" + (shown >= 160 ? " · 과목을 선택하면 더 좁힐 수 있습니다" : "")));
+        body.addView(muted(shown + "/" + matching + "문제 표시" + (shown >= 160 ? " · 과목/유형을 선택하면 더 좁힐 수 있습니다" : "")));
     }
 
     private Button exerciseButton(TextbookExercise item) {
         String marker = item.reviewNeeded ? " · 수식 검수필요" : (item.formula ? " · 수식형" : "");
-        String label = item.subject + " · " + item.book + " · PDF p." + item.page + marker + "\n" +
+        String label = item.subject + " · " + exerciseKindLabel(item.kind) + " · " + item.book + " · PDF p." + item.page + marker + "\n" +
                 item.chapter + " · " + item.number + "번 · " + item.keyword + "\n" + cleanQuestion(item.question);
         Button button = actionButton(label, v -> showTextbookExerciseDetail(item.id));
         button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -461,7 +474,7 @@ public class MainActivity extends Activity {
         screen.addView(wrapScroll(body));
 
         body.addView(actionButton("교재문제 목록으로", v -> showTextbookExercises()));
-        body.addView(section(item.subject + " 연습문제"));
+        body.addView(section(item.subject + " " + exerciseKindLabel(item.kind)));
         body.addView(muted(item.book + " · " + item.chapter + " · PDF p." + item.page + " · " + item.number + "번" + (item.reviewNeeded ? " · 수식 검수필요" : item.formula ? " · 수식형" : "")));
         body.addView(learningCard(cleanQuestion(item.question), 18, true));
         body.addView(section("핵심 키워드"));
@@ -478,8 +491,8 @@ public class MainActivity extends Activity {
         body.addView(card("전체 " + stats.total + "\n미회독 " + stats.unseen + "\n완료 " + stats.done + "\n취약 " + stats.weak + "\n별표 " + stats.starred));
         body.addView(section("과목 추정"));
         body.addView(card("송배전공학 " + db.subjectCount(SUBJECT_SONG) + "문제\n발전공학 " + db.subjectCount(SUBJECT_GEN) + "문제\n계통공학 " + db.subjectCount(SUBJECT_GRID) + "문제"));
-        body.addView(section("교재 연습문제"));
-        body.addView(card(textbookExercises.size() + "문제\n수식형 " + textbookExerciseFormulaCount() + "문제\n검수필요 " + textbookExerciseReviewCount() + "문제"));
+        body.addView(section("교재문제"));
+        body.addView(card(textbookExercises.size() + "문제\n연습문제 " + textbookExerciseKindCount("exercise") + "문제\n예제 " + textbookExerciseKindCount("example") + "문제\n수식형 " + textbookExerciseFormulaCount() + "문제\n검수필요 " + textbookExerciseReviewCount() + "문제"));
         String ocr = ocrQualityText();
         if (ocr.length() > 0) {
             body.addView(section("OCR 품질"));
@@ -644,11 +657,12 @@ public class MainActivity extends Activity {
                 if (row == null) continue;
                 TextbookExercise item = new TextbookExercise();
                 item.id = row.optString("id");
+                item.kind = row.optString("kind", "exercise");
                 item.book = row.optString("book");
                 item.subject = row.optString("subject");
                 item.chapter = row.optString("chapter");
                 item.page = row.optInt("page");
-                item.number = row.optInt("number");
+                item.number = row.optString("number");
                 item.keyword = row.optString("keyword");
                 item.question = row.optString("question");
                 item.formula = row.optBoolean("formula");
@@ -673,6 +687,18 @@ public class MainActivity extends Activity {
             if (item.formula) count++;
         }
         return count;
+    }
+
+    private int textbookExerciseKindCount(String kind) {
+        int count = 0;
+        for (TextbookExercise item : textbookExercises) {
+            if (kind.equals(item.kind)) count++;
+        }
+        return count;
+    }
+
+    private String exerciseKindLabel(String kind) {
+        return "example".equals(kind) ? "예제" : "연습문제";
     }
 
     private int textbookExerciseReviewCount() {
@@ -1086,11 +1112,12 @@ public class MainActivity extends Activity {
 
     private static class TextbookExercise {
         String id;
+        String kind;
         String book;
         String subject;
         String chapter;
         int page;
-        int number;
+        String number;
         String keyword;
         String question;
         boolean formula;
