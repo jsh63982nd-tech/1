@@ -1,11 +1,13 @@
 import json
 import re
 from pathlib import Path
+import csv
 
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT.parent / "reference-ocr-cache"
 OUTPUT = ROOT / "android-app" / "app" / "src" / "main" / "assets" / "textbook-exercises.json"
+FORMULA_REVIEW = ROOT / "formula-review.csv"
 
 BOOKS = [
     {"id": "song", "book": "최신 송배전공학", "subject": "송배전공학", "min_page": 16, "max_page": 582},
@@ -74,6 +76,17 @@ def infer_keyword(question):
     return tokens[0] if tokens else "연습문제"
 
 
+def formula_flags(question):
+    number_count = len(re.findall(r"\d", question))
+    unit_hits = len(re.findall(r"\[[^\]]{1,12}\]|kV|kW|MW|MVA|kVA|kg|km|m\]|%|pu|PU", question))
+    operator_hits = len(re.findall(r"[=+×÷*/]|\\/", question))
+    ask_calc = any(word in question for word in ["구하여라", "계산", "얼마", "몇 ", "산정", "비는", "배가"])
+    suspicious = any(token in question for token in ["[07", "[0ㅁ", "mech", "ㅁ", "F719", "AAS", "SSS", "ARS", "MMO"])
+    formula = unit_hits > 0 or operator_hits > 0 or number_count >= 8 or ask_calc
+    review = formula and (suspicious or number_count >= 12 or operator_hits >= 2 or unit_hits >= 2)
+    return formula, review
+
+
 def extract_book(book):
     page_dir = CACHE / book["id"] / "pages"
     rows = []
@@ -89,6 +102,7 @@ def extract_book(book):
         if not is_exercise_page(text):
             continue
         for seq, (number, question) in enumerate(split_numbered(text), start=1):
+            formula, review = formula_flags(question)
             rows.append({
                 "id": f"tx-{book['id']}-{page:04d}-{seq:02d}",
                 "book": book["book"],
@@ -98,6 +112,8 @@ def extract_book(book):
                 "number": number,
                 "keyword": infer_keyword(question),
                 "question": question,
+                "formula": formula,
+                "reviewNeeded": review,
             })
     return rows
 
@@ -110,7 +126,14 @@ def main():
         all_rows.extend(rows)
     payload = {"version": 1, "source": "textbook OCR exercise pages", "exercises": all_rows}
     OUTPUT.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    with FORMULA_REVIEW.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["id", "book", "subject", "chapter", "page", "number", "keyword", "formula", "reviewNeeded", "question"])
+        writer.writeheader()
+        for row in all_rows:
+            if row["formula"]:
+                writer.writerow({key: row.get(key, "") for key in writer.fieldnames})
     print(f"exercises {len(all_rows)} -> {OUTPUT}", flush=True)
+    print(f"formula review {sum(1 for row in all_rows if row['formula'])} -> {FORMULA_REVIEW}", flush=True)
 
 
 if __name__ == "__main__":
