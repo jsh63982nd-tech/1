@@ -65,13 +65,13 @@ def split_numbered(text):
 
 def split_examples(text):
     cleaned = clean(text)
-    pattern = re.compile(r"(?:예제|에제|의제|이제)\s*([0-9]{1,2}(?:[.\-][0-9]{1,2})?)")
+    pattern = re.compile(r"(?:예제|에제|의제|여제)\s*([0-9]{1,2}(?:[.\-]?[0-9]{1,2})?)|(?:이제)\s*([0-9]{1,2}[.\-][0-9]{1,2})")
     matches = list(pattern.finditer(cleaned))
     rows = []
     for idx, match in enumerate(matches):
         start = match.end()
         end = matches[idx + 1].start() if idx + 1 < len(matches) else len(cleaned)
-        number = match.group(1)
+        number = match.group(1) or match.group(2)
         body = clean(cleaned[start:end])
         if len(body) < 14:
             continue
@@ -84,6 +84,41 @@ def split_examples(text):
         if len(body) < 14:
             continue
         rows.append((number, body[:260]))
+    return rows
+
+
+def split_grid_examples(text, page):
+    raw_lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
+    lines = [clean(line) for line in raw_lines]
+    word_marker = re.compile(r"^[^가-힣A-Za-z0-9]*(?:[@©®]\s*)?(?:예제|에제|여제|이제)\s*([0-9]{1,2}[-.][0-9]{1,2})\b")
+    alias_marker = re.compile(r"^[^가-힣A-Za-z0-9]*[@©®]\s*(?:WA|wa|Wi|wi|WI|Wl|wl|wil|Fi|FH|PH|Pi|oI|OF|MI|Mi|21|4)\s*([0-9]{1,2}[-.][0-9]{1,2})\b")
+    rows = []
+    starts = []
+    for idx, line in enumerate(raw_lines):
+        match = word_marker.search(line) or alias_marker.search(line)
+        if not match:
+            continue
+        starts.append((idx, match.group(1), line[match.end():]))
+    for pos, (idx, number, remainder) in enumerate(starts):
+        end_idx = starts[pos + 1][0] if pos + 1 < len(starts) else min(len(lines), idx + 36)
+        body_lines = [remainder] + lines[idx + 1:end_idx]
+        body = clean(" ".join(body_lines))
+        body = re.sub(r"^(?:[)\]}|[JjilIl]+\s*)+", "", body).strip()
+        if len(body) < 14:
+            continue
+        if any(bad in body for bad in ["연습문제", "해답", "찾아보기", "부록", "차례", "목차"]):
+            continue
+        stop = re.search(r"(?:\?|구하여라\.?|설명하여라\.?|계산하여라\.?|비교하여라\.?|열거하여라\.?)", body)
+        if stop:
+            body = body[:stop.end()]
+        body = clean(body)
+        if len(body) < 14:
+            continue
+        rows.append((number, body[:260]))
+    if page == 34 and not any(number == "1-1" for number, _ in rows):
+        body = clean(" ".join(lines[3:24]))
+        if body:
+            rows.insert(0, ("1-1", body[:260]))
     return rows
 
 
@@ -146,7 +181,13 @@ def extract_book(book):
                     "formula": formula,
                     "reviewNeeded": review,
                 })
-        for seq, (number, question) in enumerate(split_examples(text), start=1):
+        seen_examples = set()
+        example_rows = split_grid_examples(text, page) if book["id"] == "grid" else split_examples(text)
+        for seq, (number, question) in enumerate(example_rows, start=1):
+            key = (number, question[:60])
+            if key in seen_examples:
+                continue
+            seen_examples.add(key)
             formula, review = formula_flags(question)
             rows.append({
                 "id": f"ex-{book['id']}-{page:04d}-{seq:02d}",
