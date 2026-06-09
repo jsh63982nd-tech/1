@@ -236,14 +236,20 @@ public class MainActivity extends Activity {
         screen.addView(wrapScroll(body));
 
         Stats stats = db.stats();
-        body.addView(section("오늘 볼 것"));
-        body.addView(card("전체 " + stats.total + "문제\n미회독 " + stats.unseen + " · 완료 " + stats.done + " · 취약 " + stats.weak + " · 별표 " + stats.starred));
+        body.addView(section("학습 현황"));
+        body.addView(learningCard("전체 " + stats.total + "문제\n미회독 " + stats.unseen + " · 완료 " + stats.done + " · 취약 " + stats.weak + " · 별표 " + stats.starred, 16, true));
+
+        body.addView(section("바로 시작"));
         body.addView(actionButton("미회독 시작", v -> {
             statusFilter = FILTER_UNSEEN;
             showQuestions();
         }));
         body.addView(actionButton("취약 문제 보기", v -> {
             statusFilter = FILTER_WEAK;
+            showQuestions();
+        }));
+        body.addView(actionButton("별표 문제 보기", v -> {
+            statusFilter = FILTER_STARRED;
             showQuestions();
         }));
 
@@ -317,59 +323,45 @@ public class MainActivity extends Activity {
             return;
         }
 
+        LinearLayout detailRoot = new LinearLayout(this);
+        detailRoot.setOrientation(LinearLayout.VERTICAL);
+        detailRoot.setBackgroundColor(rgb(246, 247, 249));
         LinearLayout body = paddedColumn();
         screen.removeAllViews();
-        screen.addView(wrapScroll(body));
+        screen.addView(detailRoot);
+        detailRoot.addView(wrapScroll(body), new LinearLayout.LayoutParams(-1, 0, 1));
 
-        body.addView(actionButton("목록으로", v -> showQuestions()));
-        body.addView(section(q.round));
-        body.addView(muted(q.category + " · " + q.keyword + " · " + statusLabel(q.status)));
-        body.addView(card(q.displayQuestion));
+        body.addView(detailHeader(q));
+        body.addView(learningCard(q.displayQuestion, 18, true));
 
-        LinearLayout actions = row();
-        actions.addView(smallButton("완료", v -> {
-            db.setStatus(q.id, FILTER_DONE);
-            showDetail(q.id);
-        }));
-        actions.addView(smallButton("취약", v -> {
-            db.setStatus(q.id, FILTER_WEAK);
-            showDetail(q.id);
-        }));
-        actions.addView(smallButton("미회독", v -> {
-            db.setStatus(q.id, FILTER_UNSEEN);
-            showDetail(q.id);
-        }));
-        actions.addView(smallButton(q.starred ? "별표 해제" : "별표", v -> {
-            db.setStarred(q.id, !q.starred);
-            showDetail(q.id);
-        }));
-        body.addView(actions);
+        body.addView(section("답안 키워드"));
+        body.addView(learningCard(studyKeywords(q), 15, false));
+
+        String summary = summaryText(q.id);
+        if (summary.length() > 0) {
+            body.addView(section("교재 요약/암기 포인트"));
+            body.addView(learningCard(summary, 15, false));
+        }
+
+        String reference = referenceText(q.id);
+        if (reference.length() > 0) {
+            body.addView(section("참고 페이지"));
+            body.addView(learningCard(reference, 14, false));
+        }
 
         body.addView(section("메모"));
         EditText memo = new EditText(this);
-        memo.setMinLines(4);
+        memo.setMinLines(5);
         memo.setText(q.memo);
         memo.setTextSize(15);
+        memo.setPadding(dp(12), dp(10), dp(12), dp(10));
         body.addView(memo, new LinearLayout.LayoutParams(-1, -2));
         body.addView(actionButton("메모 저장", v -> {
             db.setMemo(q.id, memo.getText().toString());
             hideKeyboard(memo);
         }));
 
-        body.addView(section("답안 키워드"));
-        body.addView(card(studyKeywords(q)));
-
-        String summary = summaryText(q.id);
-        if (summary.length() > 0) {
-            body.addView(section("교재 요약/암기 포인트"));
-            body.addView(card(summary));
-        }
-
-        String reference = referenceText(q.id);
-        if (reference.length() > 0) {
-            body.addView(section("참고 페이지"));
-            body.addView(card(reference));
-        }
+        detailRoot.addView(studyActionBar(q), new LinearLayout.LayoutParams(-1, -2));
     }
 
     private void showFrequent() {
@@ -606,6 +598,48 @@ public class MainActivity extends Activity {
         return button;
     }
 
+    private TextView detailHeader(Question q) {
+        String value = q.round + "\n" + q.category + " · " + q.keyword + " · " + statusLabel(q.status) + (q.starred ? " · 별표" : "");
+        TextView view = text(value, 14, true);
+        view.setTextColor(rgb(47, 62, 80));
+        view.setLineSpacing(dp(2), 1.0f);
+        view.setPadding(0, dp(4), 0, dp(10));
+        return view;
+    }
+
+    private LinearLayout studyActionBar(Question q) {
+        LinearLayout bar = row();
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(dp(8), dp(8), dp(8), dp(8));
+        bar.setBackgroundColor(Color.WHITE);
+        addBarButton(bar, "목록", v -> showQuestions());
+        addBarButton(bar, "미회독", v -> {
+            db.setStatus(q.id, FILTER_UNSEEN);
+            showDetail(q.id);
+        });
+        addBarButton(bar, "완료", v -> {
+            db.setStatus(q.id, FILTER_DONE);
+            showDetail(q.id);
+        });
+        addBarButton(bar, "취약", v -> {
+            db.setStatus(q.id, FILTER_WEAK);
+            showDetail(q.id);
+        });
+        addBarButton(bar, q.starred ? "별표 해제" : "별표", v -> {
+            db.setStarred(q.id, !q.starred);
+            showDetail(q.id);
+        });
+        return bar;
+    }
+
+    private void addBarButton(LinearLayout bar, String label, View.OnClickListener listener) {
+        Button button = smallButton(label, listener);
+        button.setTextSize(13);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(48), 1);
+        params.setMargins(dp(3), 0, dp(3), 0);
+        bar.addView(button, params);
+    }
+
     private String studyKeywords(Question q) {
         JSONArray rows = answerKeywordIndex.optJSONArray(q.id);
         if (rows != null && rows.length() > 0) {
@@ -797,6 +831,17 @@ public class MainActivity extends Activity {
         view.setLineSpacing(dp(3), 1.0f);
         view.setBackgroundColor(Color.WHITE);
         view.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.setMargins(0, 0, 0, dp(10));
+        view.setLayoutParams(params);
+        return view;
+    }
+
+    private TextView learningCard(String value, int sp, boolean bold) {
+        TextView view = text(value, sp, bold);
+        view.setLineSpacing(dp(5), 1.08f);
+        view.setBackgroundColor(Color.WHITE);
+        view.setPadding(dp(16), dp(14), dp(16), dp(14));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
         params.setMargins(0, 0, 0, dp(10));
         view.setLayoutParams(params);
