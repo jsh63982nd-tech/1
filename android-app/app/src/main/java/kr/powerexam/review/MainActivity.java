@@ -53,6 +53,7 @@ public class MainActivity extends Activity {
     private static final int SUBJECT_GEN = 2;
     private static final int SUBJECT_GRID = 4;
     private static final int QUESTION_SEARCH_SCHEMA = 2;
+    private static final String SELECTED_SUFFIX = " (선택됨)";
 
     private static final String[] SUBJECT_NAMES = {"송배전공학", "발전공학", "계통공학"};
     private static final String[] SONG_TERMS = {"송전", "배전", "변전", "케이블", "전선", "피뢰", "접지", "차단", "계전", "보호", "분산형전원", "계통연계", "FRT", "전압", "고장"};
@@ -198,6 +199,7 @@ public class MainActivity extends Activity {
     private String exerciseKind = "전체";
     private boolean exerciseFormulaOnly = false;
     private boolean exerciseReviewOnly = false;
+    private boolean exerciseHideReviewNeeded = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -218,7 +220,7 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(rgb(246, 247, 249));
 
-        TextView title = text("발송배전기술사 기출회독", 21, true);
+        TextView title = text("발송배전기술사 기출 회독", 21, true);
         title.setPadding(dp(16), dp(16), dp(16), dp(8));
         root.addView(title);
 
@@ -229,7 +231,7 @@ public class MainActivity extends Activity {
         nav.addView(navButton("홈", v -> showHome()));
         nav.addView(navButton("문제", v -> showQuestions()));
         nav.addView(navButton("빈출", v -> showFrequent()));
-        nav.addView(navButton("교재문제", v -> showTextbookExercises()));
+        nav.addView(navButton("교재 문제", v -> showTextbookExercises()));
         nav.addView(navButton("통계", v -> showStats()));
         navScroll.addView(nav);
         root.addView(navScroll);
@@ -263,7 +265,7 @@ public class MainActivity extends Activity {
         }));
 
         body.addView(section("오늘 추천 5문제"));
-        body.addView(muted("기록이 없으면 빈출/핵심 키워드 기준, 기록이 쌓이면 취약/별표/복습 주기를 반영합니다."));
+        body.addView(muted("취약·미회독·별표·7일 복습 주기·빈출 키워드를 합산해 추천합니다."));
         for (Question q : db.recommended(5)) {
             body.addView(recommendationButton(q, v -> showDetail(q.id)));
         }
@@ -346,6 +348,9 @@ public class MainActivity extends Activity {
         body.addView(section("답안 키워드"));
         body.addView(learningCard(studyKeywords(q), 15, false));
 
+        body.addView(section("답안 구성"));
+        body.addView(learningCard(answerTemplate(q), 15, false));
+
         String summary = summaryText(q.id);
         if (summary.length() > 0) {
             body.addView(section("교재 요약/암기 포인트"));
@@ -362,6 +367,7 @@ public class MainActivity extends Activity {
         EditText memo = new EditText(this);
         memo.setMinLines(5);
         memo.setText(q.memo);
+        memo.setHint("내 답안 목차, 빠뜨린 키워드, 계산식, 다시 볼 포인트를 적어두세요.");
         memo.setTextSize(15);
         memo.setPadding(dp(12), dp(10), dp(12), dp(10));
         body.addView(memo, new LinearLayout.LayoutParams(-1, -2));
@@ -405,14 +411,14 @@ public class MainActivity extends Activity {
         screen.removeAllViews();
         screen.addView(wrapScroll(body));
 
-        body.addView(section("교재문제"));
-        body.addView(muted("3권 교재의 연습문제와 본문 예제 OCR 추출본입니다. 수식·그림형 문제는 검수필요로 따로 분류했습니다."));
+        body.addView(section("교재 문제"));
+        body.addView(muted("3권 교재의 연습문제와 본문 예제 OCR 추출본입니다. 수식·그림형 문제는 검수 필요 항목으로 따로 분류했습니다."));
 
         LinearLayout subjects = row();
         String[] filters = {"전체", "송배전공학", "계통공학", "발전공학"};
         for (String filter : filters) {
-            subjects.addView(smallButton(filter + (filter.equals(exerciseSubject) ? " *" : ""), v -> {
-                exerciseSubject = ((Button) v).getText().toString().replace(" *", "");
+            subjects.addView(smallButton(selectedLabel(filter, filter.equals(exerciseSubject)), v -> {
+                exerciseSubject = stripSelected(((Button) v).getText().toString());
                 showTextbookExercises();
             }));
         }
@@ -420,21 +426,29 @@ public class MainActivity extends Activity {
         LinearLayout kinds = row();
         String[] kindFilters = {"전체", "연습문제", "예제"};
         for (String filter : kindFilters) {
-            kinds.addView(smallButton(filter + (filter.equals(exerciseKind) ? " *" : ""), v -> {
-                exerciseKind = ((Button) v).getText().toString().replace(" *", "");
+            kinds.addView(smallButton(selectedLabel(filter, filter.equals(exerciseKind)), v -> {
+                exerciseKind = stripSelected(((Button) v).getText().toString());
                 showTextbookExercises();
             }));
         }
         body.addView(kinds);
         LinearLayout types = row();
-        types.addView(smallButton("수식형" + (exerciseFormulaOnly ? " *" : ""), v -> {
+        types.addView(smallButton(selectedLabel("검수 제외", exerciseHideReviewNeeded), v -> {
+            exerciseHideReviewNeeded = !exerciseHideReviewNeeded;
+            if (exerciseReviewOnly) exerciseHideReviewNeeded = false;
+            showTextbookExercises();
+        }));
+        types.addView(smallButton(selectedLabel("수식형", exerciseFormulaOnly), v -> {
             exerciseFormulaOnly = !exerciseFormulaOnly;
             if (!exerciseFormulaOnly) exerciseReviewOnly = false;
             showTextbookExercises();
         }));
-        types.addView(smallButton("검수필요" + (exerciseReviewOnly ? " *" : ""), v -> {
+        types.addView(smallButton(selectedLabel("검수 필요", exerciseReviewOnly), v -> {
             exerciseReviewOnly = !exerciseReviewOnly;
-            if (exerciseReviewOnly) exerciseFormulaOnly = true;
+            if (exerciseReviewOnly) {
+                exerciseFormulaOnly = true;
+                exerciseHideReviewNeeded = false;
+            }
             showTextbookExercises();
         }));
         body.addView(types);
@@ -444,6 +458,7 @@ public class MainActivity extends Activity {
         for (TextbookExercise item : textbookExercises) {
             if (!"전체".equals(exerciseSubject) && !exerciseSubject.equals(item.subject)) continue;
             if (!"전체".equals(exerciseKind) && !exerciseKind.equals(exerciseKindLabel(item.kind))) continue;
+            if (exerciseHideReviewNeeded && item.reviewNeeded) continue;
             if (exerciseFormulaOnly && !item.formula) continue;
             if (exerciseReviewOnly && !item.reviewNeeded) continue;
             matching++;
@@ -451,11 +466,11 @@ public class MainActivity extends Activity {
             shown++;
             if (shown >= 160) break;
         }
-        body.addView(muted(shown + "/" + matching + "문제 표시" + (shown >= 160 ? " · 과목/유형을 선택하면 더 좁힐 수 있습니다" : "")));
+        body.addView(muted(shown + "/" + matching + "문제 표시" + (exerciseHideReviewNeeded ? " · 검수 필요 항목 제외 중" : "") + (shown >= 160 ? " · 과목/유형을 선택하면 더 좁힐 수 있습니다" : "")));
     }
 
     private Button exerciseButton(TextbookExercise item) {
-        String marker = item.reviewNeeded ? " · 수식 검수필요" : (item.formula ? " · 수식형" : "");
+        String marker = item.reviewNeeded ? " · 수식 검수 필요" : (item.formula ? " · 수식형" : "");
         String label = item.subject + " · " + exerciseKindLabel(item.kind) + " · " + item.book + " · PDF p." + item.page + marker + "\n" +
                 item.chapter + " · " + item.number + "번 · " + item.keyword + "\n" + cleanQuestion(item.question);
         Button button = actionButton(label, v -> showTextbookExerciseDetail(item.id));
@@ -473,9 +488,9 @@ public class MainActivity extends Activity {
         screen.removeAllViews();
         screen.addView(wrapScroll(body));
 
-        body.addView(actionButton("교재문제 목록으로", v -> showTextbookExercises()));
+        body.addView(actionButton("교재 문제 목록으로", v -> showTextbookExercises()));
         body.addView(section(item.subject + " " + exerciseKindLabel(item.kind)));
-        body.addView(muted(item.book + " · " + item.chapter + " · PDF p." + item.page + " · " + item.number + "번" + (item.reviewNeeded ? " · 수식 검수필요" : item.formula ? " · 수식형" : "")));
+        body.addView(muted(item.book + " · " + item.chapter + " · PDF p." + item.page + " · " + item.number + "번" + (item.reviewNeeded ? " · 수식 검수 필요" : item.formula ? " · 수식형" : "")));
         body.addView(learningCard(cleanQuestion(item.question), 18, true));
         body.addView(section("핵심 키워드"));
         body.addView(learningCard(item.keyword, 15, false));
@@ -491,8 +506,8 @@ public class MainActivity extends Activity {
         body.addView(card("전체 " + stats.total + "\n미회독 " + stats.unseen + "\n완료 " + stats.done + "\n취약 " + stats.weak + "\n별표 " + stats.starred));
         body.addView(section("과목 추정"));
         body.addView(card("송배전공학 " + db.subjectCount(SUBJECT_SONG) + "문제\n발전공학 " + db.subjectCount(SUBJECT_GEN) + "문제\n계통공학 " + db.subjectCount(SUBJECT_GRID) + "문제"));
-        body.addView(section("교재문제"));
-        body.addView(card(textbookExercises.size() + "문제\n연습문제 " + textbookExerciseKindCount("exercise") + "문제\n예제 " + textbookExerciseKindCount("example") + "문제\n수식형 " + textbookExerciseFormulaCount() + "문제\n검수필요 " + textbookExerciseReviewCount() + "문제"));
+        body.addView(section("교재 문제"));
+        body.addView(card(textbookExercises.size() + "문제\n연습문제 " + textbookExerciseKindCount("exercise") + "문제\n예제 " + textbookExerciseKindCount("example") + "문제\n수식형 " + textbookExerciseFormulaCount() + "문제\n검수 필요 " + textbookExerciseReviewCount() + "문제"));
         String ocr = ocrQualityText();
         if (ocr.length() > 0) {
             body.addView(section("OCR 품질"));
@@ -507,7 +522,7 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
-        intent.putExtra(Intent.EXTRA_TITLE, "power-exam-review-backup.json");
+        intent.putExtra(Intent.EXTRA_TITLE, "기출-회독-백업-" + new SimpleDateFormat("yyyyMMdd-HHmm", Locale.KOREA).format(new Date()) + ".json");
         startActivityForResult(intent, REQUEST_EXPORT_BACKUP);
     }
 
@@ -771,11 +786,19 @@ public class MainActivity extends Activity {
     }
 
     private void addFilter(LinearLayout filters, String value, String label) {
-        Button button = smallButton(label + (value.equals(statusFilter) ? " *" : ""), v -> {
+        Button button = smallButton(selectedLabel(label, value.equals(statusFilter)), v -> {
             statusFilter = value;
             showQuestions();
         });
         filters.addView(button);
+    }
+
+    private String selectedLabel(String label, boolean selected) {
+        return selected ? label + SELECTED_SUFFIX : label;
+    }
+
+    private String stripSelected(String label) {
+        return label.replace(SELECTED_SUFFIX, "");
     }
 
     private Button questionButton(Question q, View.OnClickListener listener) {
@@ -792,7 +815,7 @@ public class MainActivity extends Activity {
     }
 
     private TextView detailHeader(Question q) {
-        String value = q.round + "\n" + q.category + " · " + q.keyword + " · " + statusLabel(q.status) + (q.starred ? " · 별표" : "");
+        String value = q.round + "\n" + q.category + " · " + q.keyword + " · " + statusLabel(q.status) + (q.starred ? " · 별표" : "") + "\n" + reviewStatusText(q);
         TextView view = text(value, 14, true);
         view.setTextColor(rgb(47, 62, 80));
         view.setLineSpacing(dp(2), 1.0f);
@@ -806,15 +829,15 @@ public class MainActivity extends Activity {
         bar.setPadding(dp(8), dp(8), dp(8), dp(8));
         bar.setBackgroundColor(Color.WHITE);
         addBarButton(bar, "목록", v -> showQuestions());
-        addBarButton(bar, "미회독", v -> {
+        addBarButton(bar, "다시 보기", v -> {
             db.setStatus(q.id, FILTER_UNSEEN);
             showDetail(q.id);
         });
-        addBarButton(bar, "완료", v -> {
+        addBarButton(bar, "회독 완료", v -> {
             db.setStatus(q.id, FILTER_DONE);
             showDetail(q.id);
         });
-        addBarButton(bar, "취약", v -> {
+        addBarButton(bar, "취약 표시", v -> {
             db.setStatus(q.id, FILTER_WEAK);
             showDetail(q.id);
         });
@@ -853,6 +876,21 @@ public class MainActivity extends Activity {
         return String.join(" · ", terms);
     }
 
+    private String answerTemplate(Question q) {
+        List<String> lines = new ArrayList<>();
+        String topic = q.keyword == null || q.keyword.length() == 0 ? "핵심 주제" : q.keyword;
+        lines.add("1. 정의: " + topic + "의 목적과 적용 범위를 먼저 쓴다.");
+        lines.add("2. 원리/구성: 동작 원리, 주요 구성 요소, 기준값을 나눈다.");
+        if (containsAny(q.question + q.keyword, new String[]{"계산", "정정", "전류", "전압", "용량", "손실", "효율", "단락"})) {
+            lines.add("3. 계산/기준: 필요한 식, 단위, 판정 기준을 명확히 적는다.");
+        } else {
+            lines.add("3. 특징: 장점, 단점, 적용 조건을 표처럼 정리한다.");
+        }
+        lines.add("4. 문제점/대책: 사고 원인, 영향, 보호·운전 대책을 연결한다.");
+        lines.add("5. 결론: 현장 적용 시 유의점과 답안 키워드를 다시 묶는다.");
+        return String.join("\n", lines);
+    }
+
     private String statusLabel(String status) {
         if (FILTER_DONE.equals(status)) return "완료";
         if (FILTER_WEAK.equals(status)) return "취약";
@@ -874,6 +912,19 @@ public class MainActivity extends Activity {
         if (q.memo != null && q.memo.trim().length() > 0) reasons.add("메모 있음");
         if (reasons.isEmpty()) reasons.add("기본 추천");
         return String.join(" · ", reasons);
+    }
+
+    private String reviewStatusText(Question q) {
+        if (FILTER_WEAK.equals(q.status)) {
+            return "복습 상태: 취약 문제 · 우선 회독 권장";
+        }
+        if (FILTER_DONE.equals(q.status)) {
+            int days = reviewAgeDays(q.reviewedAt);
+            if (days >= 14) return "복습 상태: 완료 후 " + days + "일 경과 · 장기 복습 대상";
+            if (days >= 7) return "복습 상태: 완료 후 " + days + "일 경과 · 복습 주기 도래";
+            return "복습 상태: 최근 완료 · " + Math.max(1, 7 - days) + "일 뒤 재복습 권장";
+        }
+        return "복습 상태: 아직 회독하지 않음";
     }
 
     private boolean hasCoreKeyword(Question q) {
