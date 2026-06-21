@@ -1,0 +1,8 @@
+기출 회독 Android APK
+
+- Commit: 1c3d61b2a7013e3f95892d7e65ec8929d49ff5b9
+- Build: 23
+- Debug APK: apk/power-exam-review-debug.apk
+- Release APK: apk/power-exam-review-release.apk
+
+- 1c3d61b Polish Android release and maintenance
