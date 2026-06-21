@@ -22,7 +22,7 @@
 최신 APK는 저장소의 `apk` 폴더에서 받을 수 있습니다.
 
 - `apk/power-exam-review-debug.apk`: 일반 테스트 설치용
-- `apk/power-exam-review-release-unsigned.apk`: unsigned release 빌드
+- `apk/power-exam-review-release.apk`: release 빌드. Secrets가 없으면 unsigned APK입니다.
 
 Android에서 직접 설치하려면 APK를 내려받은 뒤 “알 수 없는 앱 설치” 권한을 허용해야 할 수 있습니다.
 
@@ -74,7 +74,7 @@ gradle assembleDebug assembleRelease
 빌드 결과는 Actions artifact로 업로드되고 아래 파일로도 복사됩니다.
 
 - `apk/power-exam-review-debug.apk`
-- `apk/power-exam-review-release-unsigned.apk`
+- `apk/power-exam-review-release.apk`
 
 ## 로컬 빌드
 
@@ -93,3 +93,24 @@ cd android-app
 ```
 
 로컬 재현성을 높이려면 추후 Gradle Wrapper(`gradlew`, `gradlew.bat`, `gradle/wrapper/*`)를 추가하는 것이 좋습니다.
+
+## 데이터 품질 리포트
+
+기출/키워드/OCR 자료 상태는 아래 스크립트로 점검할 수 있습니다.
+
+```powershell
+python ..\tools\audit_android_data.py
+```
+
+결과는 `android-app/DATA_AUDIT.md`에 저장됩니다.
+
+## 서명 APK 준비
+
+GitHub Actions는 아래 Secrets가 있으면 release 서명 설정을 사용할 수 있습니다.
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+Secrets가 없으면 기존처럼 unsigned release APK를 생성합니다.

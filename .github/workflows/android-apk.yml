@@ -13,6 +13,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -23,6 +25,27 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.10.2"
+      - name: Decode signing keystore
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        working-directory: android-app
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.keystore
+          echo "ANDROID_KEYSTORE_FILE=$PWD/release.keystore" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+      - name: Generate release notes
+        run: |
+          {
+            echo "기출 회독 Android APK"
+            echo
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Build: $GITHUB_RUN_NUMBER"
+            echo "- Debug APK: apk/power-exam-review-debug.apk"
+            echo "- Release APK: apk/power-exam-review-release.apk"
+            echo
+            git log -5 --pretty=format:"- %h %s"
+          } > release-notes.txt
       - name: Build APKs
         working-directory: android-app
         run: gradle assembleDebug assembleRelease
@@ -34,15 +57,21 @@ jobs:
       - name: Upload unsigned release APK
         uses: actions/upload-artifact@v4
         with:
-          name: power-exam-review-release-unsigned-apk
-          path: android-app/app/build/outputs/apk/release/app-release-unsigned.apk
+          name: power-exam-review-release-apk
+          path: android-app/app/build/outputs/apk/release/*.apk
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: power-exam-review-release-notes
+          path: release-notes.txt
       - name: Commit APK for direct download
         run: |
           mkdir -p apk
           cp android-app/app/build/outputs/apk/debug/app-debug.apk apk/power-exam-review-debug.apk
-          cp android-app/app/build/outputs/apk/release/app-release-unsigned.apk apk/power-exam-review-release-unsigned.apk
+          cp "$(ls android-app/app/build/outputs/apk/release/*.apk | head -n 1)" apk/power-exam-review-release.apk
+          cp release-notes.txt apk/RELEASE_NOTES.txt
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add apk/power-exam-review-debug.apk apk/power-exam-review-release-unsigned.apk
+          git add apk/power-exam-review-debug.apk apk/power-exam-review-release.apk apk/RELEASE_NOTES.txt
           git commit -m "Build Android APKs" || exit 0
           git push

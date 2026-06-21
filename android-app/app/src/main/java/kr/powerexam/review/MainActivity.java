@@ -34,6 +34,8 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -60,33 +62,6 @@ public class MainActivity extends Activity {
     private static final String[] SONG_TERMS = {"송전", "배전", "변전", "케이블", "전선", "피뢰", "접지", "차단", "계전", "보호", "분산형전원", "계통연계", "FRT", "전압", "고장"};
     private static final String[] GEN_TERMS = {"발전", "발전기", "화력", "수력", "원자력", "태양광", "풍력", "터빈", "보일러", "수차", "ESS", "연료전지"};
     private static final String[] GRID_TERMS = {"계통", "조류", "안정도", "주파수", "무효전력", "고조파", "전력시장", "예비력", "신뢰도", "HVDC", "STATCOM", "SVC"};
-    private static final int[] REVIEW_INTERVAL_DAYS = {1, 3, 7, 14, 30};
-    private static final String[][] KEYWORD_ALIASES = {
-            {"전력용콘덴서", "콘덴서 SC capacitor"},
-            {"콘덴서", "전력용콘덴서 SC capacitor"},
-            {"보호계전", "계전기 보호릴레이 relay"},
-            {"계전기", "보호계전 relay"},
-            {"과전류", "OCR 50 51 overcurrent"},
-            {"접지", "중성점접지 grounding earth"},
-            {"중성점", "접지 NGR"},
-            {"변압기", "transformer TR"},
-            {"피뢰기", "LA surge arrester"},
-            {"차단기", "CB breaker"},
-            {"전압", "voltage V"},
-            {"전류", "current I"},
-            {"단락", "short circuit 고장"},
-            {"고장", "fault 단락 지락"},
-            {"HVDC", "직류송전 고압직류"},
-            {"STATCOM", "무효전력 보상 FACTS"},
-            {"SVC", "무효전력 보상 FACTS"},
-            {"ESS", "에너지저장장치 storage"},
-            {"분산형전원", "DER DG 계통연계"},
-            {"태양광", "PV 인버터"},
-            {"풍력", "wind"},
-            {"원자력", "nuclear"},
-            {"터빈", "turbine"},
-            {"보일러", "boiler"}
-    };
     private static final String[][] LITERAL_SPACING_FIXES = {
             {"SpecialProtectionSystem", "Special Protection System"},
             {"EnergyStorageSystem", "Energy Storage System"},
@@ -238,6 +213,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        showStartupLoading();
         db = new Db(this);
         db.seedIfNeeded();
         loadReferences();
@@ -247,6 +223,20 @@ public class MainActivity extends Activity {
         loadTextbookExercises();
         buildShell();
         showHome();
+    }
+
+    private void showStartupLoading() {
+        LinearLayout loading = new LinearLayout(this);
+        loading.setOrientation(LinearLayout.VERTICAL);
+        loading.setGravity(Gravity.CENTER);
+        loading.setBackgroundColor(rgb(246, 247, 249));
+        TextView title = text("기출 회독", 24, true);
+        title.setGravity(Gravity.CENTER);
+        TextView message = muted("문제 자료를 불러오는 중입니다.");
+        message.setGravity(Gravity.CENTER);
+        loading.addView(title);
+        loading.addView(message);
+        setContentView(loading);
     }
 
     @Override
@@ -524,7 +514,7 @@ public class MainActivity extends Activity {
         screen.addView(wrapScroll(body));
 
         body.addView(section("교재 문제"));
-        body.addView(muted("3권 교재의 연습문제와 본문 예제 OCR 추출본입니다. 수식·그림형 문제는 검수 필요 항목으로 따로 분류했습니다."));
+        body.addView(muted("3권 교재의 연습문제와 본문 예제 OCR 추출본입니다. 검수 필요 항목은 기본 제외되며, 필요할 때만 따로 확인합니다."));
 
         LinearLayout subjects = row();
         String[] filters = {"전체", "송배전공학", "계통공학", "발전공학"};
@@ -620,12 +610,31 @@ public class MainActivity extends Activity {
         body.addView(card("송배전공학 " + db.subjectCount(SUBJECT_SONG) + "문제\n발전공학 " + db.subjectCount(SUBJECT_GEN) + "문제\n계통공학 " + db.subjectCount(SUBJECT_GRID) + "문제"));
         body.addView(section("교재 문제"));
         body.addView(card(textbookExercises.size() + "문제\n연습문제 " + textbookExerciseKindCount("exercise") + "문제\n예제 " + textbookExerciseKindCount("example") + "문제\n수식형 " + textbookExerciseFormulaCount() + "문제\n검수 필요 " + textbookExerciseReviewCount() + "문제"));
+        body.addView(actionButton("OCR 검수 필요 목록", v -> {
+            exerciseSubject = "전체";
+            exerciseKind = "전체";
+            exerciseFormulaOnly = true;
+            exerciseReviewOnly = true;
+            exerciseHideReviewNeeded = false;
+            showTextbookExercises();
+        }));
+        body.addView(actionButton("교재 문제 전체 보기", v -> {
+            exerciseSubject = "전체";
+            exerciseKind = "전체";
+            exerciseFormulaOnly = false;
+            exerciseReviewOnly = false;
+            exerciseHideReviewNeeded = false;
+            showTextbookExercises();
+        }));
         String ocr = ocrQualityText();
         if (ocr.length() > 0) {
             body.addView(section("OCR 품질"));
             body.addView(card(ocr));
         }
+        body.addView(section("데이터 품질"));
+        body.addView(card(db.questionQualityText()));
         body.addView(section("백업"));
+        body.addView(card("마지막 백업: " + db.lastBackupText() + "\n가져오기는 현재 회독 기록을 백업 파일 내용으로 교체합니다."));
         body.addView(actionButton("회독 기록 백업 내보내기", v -> exportBackup()));
         body.addView(actionButton("회독 기록 백업 가져오기", v -> importBackup()));
     }
@@ -673,6 +682,7 @@ public class MainActivity extends Activity {
         }
         output.write(db.exportStateJson().toString().getBytes("UTF-8"));
         output.close();
+        db.recordBackupExport();
     }
 
     private void readBackup(Uri uri) throws Exception {
@@ -785,13 +795,13 @@ public class MainActivity extends Activity {
                 TextbookExercise item = new TextbookExercise();
                 item.id = row.optString("id");
                 item.kind = row.optString("kind", "exercise");
-                item.book = row.optString("book");
-                item.subject = row.optString("subject");
-                item.chapter = row.optString("chapter");
+                item.book = repairMojibake(row.optString("book"));
+                item.subject = repairMojibake(row.optString("subject"));
+                item.chapter = repairMojibake(row.optString("chapter"));
                 item.page = row.optInt("page");
-                item.number = row.optString("number");
-                item.keyword = row.optString("keyword");
-                item.question = row.optString("question");
+                item.number = repairMojibake(row.optString("number"));
+                item.keyword = repairMojibake(row.optString("keyword"));
+                item.question = repairMojibake(row.optString("question"));
                 item.formula = row.optBoolean("formula");
                 item.reviewNeeded = row.optBoolean("reviewNeeded");
                 textbookExercises.add(item);
@@ -1249,7 +1259,7 @@ public class MainActivity extends Activity {
     }
 
     private String cleanQuestion(String value) {
-        String text = String.valueOf(value).replace('\u00a0', ' ').replaceAll("\\s+", " ").trim();
+        String text = repairMojibake(String.valueOf(value)).replace('\u00a0', ' ').replaceAll("\\s+", " ").trim();
         for (String[] rule : LITERAL_SPACING_FIXES) {
             text = text.replace(rule[0], rule[1]);
         }
@@ -1268,9 +1278,37 @@ public class MainActivity extends Activity {
         return text;
     }
 
+    private static String repairMojibake(String value) {
+        if (value == null || value.length() == 0) return "";
+        String candidate = value;
+        try {
+            String converted = new String(value.getBytes(Charset.forName("MS949")), StandardCharsets.UTF_8);
+            if (mojibakeScore(converted) < mojibakeScore(candidate)) {
+                candidate = converted;
+            }
+        } catch (Exception ignored) {
+        }
+        return candidate
+                .replace('\uFFFD', '?')
+                .replaceAll("\\?{2,}", "?")
+                .trim();
+    }
+
+    private static int mojibakeScore(String value) {
+        int score = 0;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '\uFFFD') score += 5;
+            if (c == '?' || c == 0x8ADB || c == 0xC4D6 || c == 0xAFB8 || c == 0xC830 || c == 0xB6AE) score += 2;
+            if (c >= 0xAC00 && c <= 0xD7A3) score -= 1;
+        }
+        return score;
+    }
+
     private int subjectMask(String subject) {
-        if ("발전공학".equals(subject)) return SUBJECT_GEN;
-        if ("계통공학".equals(subject)) return SUBJECT_GRID;
+        String fixed = repairMojibake(subject);
+        if (fixed.contains("\uBC1C\uC804")) return SUBJECT_GEN;
+        if (fixed.contains("\uACC4\uD1B5")) return SUBJECT_GRID;
         return SUBJECT_SONG;
     }
 
@@ -1335,7 +1373,7 @@ public class MainActivity extends Activity {
         String source = String.valueOf(value);
         String compact = normalize(source);
         StringBuilder aliases = new StringBuilder();
-        for (String[] row : KEYWORD_ALIASES) {
+        for (String[] row : StudyPolicy.KEYWORD_ALIASES) {
             String key = row[0];
             if (source.contains(key) || compact.contains(normalize(key))) {
                 aliases.append(' ').append(row[1]);
@@ -1565,7 +1603,7 @@ public class MainActivity extends Activity {
 
     private class Db extends SQLiteOpenHelper {
         Db(Context context) {
-            super(context, "power_exam_review_v2.db", null, 2);
+            super(context, "power_exam_review_v3.db", null, 3);
         }
 
         public void onCreate(SQLiteDatabase database) {
@@ -1635,10 +1673,10 @@ public class MainActivity extends Activity {
             for (int i = 0; i < array.length(); i++) {
                 JSONObject obj = array.getJSONObject(i);
                 String id = obj.optString("id");
-                String round = obj.optString("round");
-                String category = obj.optString("category");
-                String keyword = normalizeKeyword(obj.optString("keyword"));
-                String question = obj.optString("question");
+                String round = repairMojibake(obj.optString("round"));
+                String category = repairMojibake(obj.optString("category"));
+                String keyword = normalizeKeyword(repairMojibake(obj.optString("keyword")));
+                String question = repairMojibake(obj.optString("question"));
                 String cleaned = cleanQuestion(question);
                 String searchSource = round + " " + category + " " + keyword + " " + splitCompactKorean(keyword) + " " + question + " " + cleaned;
                 String search = normalize(searchSource + " " + aliasText(searchSource));
@@ -1762,7 +1800,7 @@ public class MainActivity extends Activity {
                 reviewCount += 1;
                 values.put("reviewedAt", new SimpleDateFormat("yyyy-MM-dd", Locale.KOREA).format(new Date()));
                 values.put("reviewCount", reviewCount);
-                values.put("dueAt", addDays(REVIEW_INTERVAL_DAYS[Math.min(reviewCount - 1, REVIEW_INTERVAL_DAYS.length - 1)]));
+                values.put("dueAt", addDays(StudyPolicy.REVIEW_INTERVAL_DAYS[Math.min(reviewCount - 1, StudyPolicy.REVIEW_INTERVAL_DAYS.length - 1)]));
             } else if (FILTER_WEAK.equals(status)) {
                 values.put("dueAt", addDays(1));
             } else if (FILTER_UNSEEN.equals(status)) {
@@ -2010,6 +2048,38 @@ public class MainActivity extends Activity {
             } finally {
                 cursor.close();
             }
+        }
+
+        private String metadataText(String key) {
+            Cursor cursor = getReadableDatabase().rawQuery("SELECT value FROM metadata WHERE key=?", new String[]{key});
+            try {
+                return cursor.moveToFirst() ? cursor.getString(0) : "";
+            } finally {
+                cursor.close();
+            }
+        }
+
+        void recordBackupExport() {
+            setMetadata(getWritableDatabase(), "lastBackupAt", new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.KOREA).format(new Date()));
+        }
+
+        String lastBackupText() {
+            String value = metadataText("lastBackupAt");
+            return value.length() == 0 ? "기록 없음" : value;
+        }
+
+        String questionQualityText() {
+            SQLiteDatabase database = getReadableDatabase();
+            int total = scalarInt(database, "SELECT COUNT(*) FROM questions");
+            int keywords = scalarInt(database, "SELECT COUNT(DISTINCT keyword) FROM questions");
+            int repeatedKeywords = scalarInt(database, "SELECT COUNT(*) FROM (SELECT keyword FROM questions GROUP BY keyword HAVING COUNT(*) >= 3)");
+            int duplicateTexts = scalarInt(database, "SELECT COUNT(*) FROM (SELECT question FROM questions GROUP BY question HAVING COUNT(*) > 1)");
+            int timed = scalarInt(database, "SELECT COUNT(*) FROM state WHERE elapsedSeconds > 0");
+            int graded = scalarInt(database, "SELECT COUNT(*) FROM state WHERE IFNULL(selfGrade,'') <> ''");
+            return "기출 " + total + "문제 · 키워드 " + keywords + "개\n" +
+                    "3회 이상 반복 키워드 " + repeatedKeywords + "개\n" +
+                    "동일 지문 중복 후보 " + duplicateTexts + "개\n" +
+                    "실전 시간 기록 " + timed + "문제 · 자가평가 " + graded + "문제";
         }
 
         private void setMetadata(SQLiteDatabase database, String key, String value) {
