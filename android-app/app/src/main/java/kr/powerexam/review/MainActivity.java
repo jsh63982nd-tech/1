@@ -284,6 +284,7 @@ public class MainActivity extends Activity {
         body.addView(learningCard(homeFocusText(stats), 15, false));
 
         body.addView(section("바로 시작"));
+        body.addView(actionButton("오늘 약점 큐", v -> showWeakQueue()));
         body.addView(actionButton("미회독 시작", v -> {
             statusFilter = FILTER_UNSEEN;
             showQuestions();
@@ -300,6 +301,23 @@ public class MainActivity extends Activity {
         body.addView(section("오늘 추천 5문제"));
         body.addView(muted("취약·미회독·별표·7일 복습 주기·빈출 키워드를 합산해 추천합니다."));
         for (Question q : db.recommended(5)) {
+            body.addView(recommendationButton(q, v -> showDetail(q.id)));
+        }
+    }
+
+    private void showWeakQueue() {
+        LinearLayout body = paddedColumn();
+        screen.removeAllViews();
+        screen.addView(wrapScroll(body));
+
+        List<Question> rows = db.weakQueue(80);
+        body.addView(section("오늘 약점 큐"));
+        body.addView(muted("복습 도래, 취약 표시, 자가평가 하, 시간 초과, 키워드 누락을 우선 배치합니다."));
+        if (rows.isEmpty()) {
+            body.addView(card("오늘 처리할 약점 신호가 없습니다."));
+            return;
+        }
+        for (Question q : rows) {
             body.addView(recommendationButton(q, v -> showDetail(q.id)));
         }
     }
@@ -1157,8 +1175,7 @@ public class MainActivity extends Activity {
         Set<String> terms = new HashSet<>();
         terms.add(q.keyword);
         String text = q.question + " " + q.keyword;
-        String[] candidates = {"정의", "원리", "특징", "장점", "단점", "문제점", "대책", "보호장치", "전압", "주파수", "고장전류", "단락용량", "FRT", "단독운전", "피뢰기", "접지", "계통연계", "무효전력"};
-        for (String candidate : candidates) {
+        for (String candidate : StudyPolicy.STUDY_KEYWORD_CANDIDATES) {
             if (text.contains(candidate)) terms.add(candidate);
         }
         return String.join(" · ", terms);
@@ -1198,6 +1215,9 @@ public class MainActivity extends Activity {
         if (q.starred) reasons.add("별표");
         if (q.frequency >= 3) reasons.add("빈출 키워드");
         if (hasCoreKeyword(q)) reasons.add("핵심 키워드");
+        if ("하".equals(q.selfGrade)) reasons.add("자가평가 하");
+        if (hasAnyTag(q.selfTags, StudyPolicy.WEAK_REVIEW_TAGS)) reasons.add("오답 태그");
+        if (q.elapsedSeconds >= 25 * 60) reasons.add("25분 초과");
         if (q.memo != null && q.memo.trim().length() > 0) reasons.add("메모 있음");
         if (reasons.isEmpty()) reasons.add("기본 추천");
         return String.join(" · ", reasons);
@@ -1223,9 +1243,16 @@ public class MainActivity extends Activity {
 
     private boolean hasCoreKeyword(Question q) {
         String text = q.keyword + " " + q.question;
-        String[] cores = {"보호", "계전", "전압", "고장", "단락", "접지", "피뢰", "안정도", "무효전력", "주파수", "발전기", "터빈", "보일러", "ESS", "분산형전원", "계통연계"};
-        for (String core : cores) {
+        for (String core : StudyPolicy.CORE_KEYWORDS) {
             if (text.contains(core)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasAnyTag(String tags, String[] candidates) {
+        if (tags == null || tags.length() == 0) return false;
+        for (String candidate : candidates) {
+            if (tags.contains(candidate)) return true;
         }
         return false;
     }
@@ -1347,7 +1374,23 @@ public class MainActivity extends Activity {
                 tokens.add(token);
             }
         }
+        for (String[] row : StudyPolicy.KEYWORD_ALIASES) {
+            String key = normalize(row[0]);
+            String aliases = normalize(row[1]);
+            if ((!key.isEmpty() && whole.contains(key)) || (!aliases.isEmpty() && aliases.contains(whole))) {
+                addSearchTokens(tokens, row[0] + " " + row[1]);
+            }
+        }
         return tokens;
+    }
+
+    private void addSearchTokens(List<String> tokens, String value) {
+        for (String part : String.valueOf(value).trim().split("\\s+")) {
+            String token = normalize(part);
+            if (token.length() > 0 && !tokens.contains(token)) {
+                tokens.add(token);
+            }
+        }
     }
 
     private String splitCompactKorean(String value) {
@@ -1724,19 +1767,14 @@ public class MainActivity extends Activity {
         }
 
         List<Question> recommended(int limit) {
-            String frequency = "(SELECT COUNT(*) FROM questions k WHERE k.keyword=q.keyword)";
-            String core = "(CASE WHEN q.search LIKE '%보호%' OR q.search LIKE '%계전%' OR q.search LIKE '%전압%' OR q.search LIKE '%고장%' OR q.search LIKE '%단락%' OR q.search LIKE '%접지%' OR q.search LIKE '%안정도%' OR q.search LIKE '%주파수%' THEN 45 ELSE 0 END)";
-            String recency = "(CASE WHEN IFNULL(s.status,'unseen')='done' AND IFNULL(s.reviewedAt,'') <> '' THEN CAST(julianday('now') - julianday(s.reviewedAt) AS INTEGER) * 4 ELSE 0 END)";
-            String due = "(CASE WHEN IFNULL(s.dueAt,'') <> '' AND s.dueAt <= date('now') THEN 220 ELSE 0 END)";
-            String score = "(" +
-                    "CASE IFNULL(s.status,'unseen') WHEN 'weak' THEN 180 WHEN 'unseen' THEN 100 WHEN 'done' THEN 10 ELSE 60 END + " +
-                    "IFNULL(s.starred,0) * 80 + " +
-                    "CASE WHEN IFNULL(s.memo,'') <> '' THEN 35 ELSE 0 END + " +
-                    "CASE WHEN " + frequency + " >= 5 THEN 70 WHEN " + frequency + " >= 3 THEN 45 WHEN " + frequency + " >= 2 THEN 25 ELSE 0 END + " +
-                    core + " + " + recency + " + " + due +
-                    ")";
+            String score = recommendationScoreSql();
             List<Question> rows = query(
-                    "IFNULL(s.status,'unseen') != 'done' OR (IFNULL(s.dueAt,'') <> '' AND s.dueAt <= date('now')) OR s.reviewedAt IS NULL OR s.reviewedAt <= date('now','-7 day')",
+                    "IFNULL(s.status,'unseen') != 'done' OR " +
+                            "(IFNULL(s.dueAt,'') <> '' AND s.dueAt <= date('now')) OR " +
+                            "IFNULL(s.selfGrade,'')='하' OR " +
+                            weakTagSql() + " OR " +
+                            "IFNULL(s.elapsedSeconds,0) >= 1500 OR " +
+                            "s.reviewedAt IS NULL OR s.reviewedAt <= date('now','-7 day')",
                     new String[0],
                     score + " DESC, CASE IFNULL(s.status,'unseen') WHEN 'weak' THEN 0 WHEN 'unseen' THEN 1 ELSE 2 END, q.round, q.id",
                     limit
@@ -1748,6 +1786,57 @@ public class MainActivity extends Activity {
                 q.recommendationReason = recommendationReason(q);
             }
             return rows;
+        }
+
+        List<Question> weakQueue(int limit) {
+            String score = recommendationScoreSql();
+            List<Question> rows = query(
+                    "IFNULL(s.status,'unseen')='weak' OR " +
+                            "(IFNULL(s.dueAt,'') <> '' AND s.dueAt <= date('now')) OR " +
+                            "IFNULL(s.selfGrade,'')='하' OR " +
+                            weakTagSql() + " OR " +
+                            "IFNULL(s.elapsedSeconds,0) >= 1500 OR " +
+                            "IFNULL(s.starred,0)=1",
+                    new String[0],
+                    score + " DESC, q.round, q.id",
+                    limit
+            );
+            for (Question q : rows) {
+                q.recommendationReason = recommendationReason(q);
+            }
+            return rows;
+        }
+
+        private String recommendationScoreSql() {
+            String frequency = "(SELECT COUNT(*) FROM questions k WHERE k.keyword=q.keyword)";
+            String recency = "(CASE WHEN IFNULL(s.status,'unseen')='done' AND IFNULL(s.reviewedAt,'') <> '' THEN CAST(julianday('now') - julianday(s.reviewedAt) AS INTEGER) * 4 ELSE 0 END)";
+            String due = "(CASE WHEN IFNULL(s.dueAt,'') <> '' AND s.dueAt <= date('now') THEN 240 ELSE 0 END)";
+            String failure = "(CASE WHEN IFNULL(s.selfGrade,'')='하' THEN 160 ELSE 0 END + CASE WHEN " + weakTagSql() + " THEN 120 ELSE 0 END + CASE WHEN IFNULL(s.elapsedSeconds,0) >= 1500 THEN 70 ELSE 0 END)";
+            return "(" +
+                    "CASE IFNULL(s.status,'unseen') WHEN 'weak' THEN 190 WHEN 'unseen' THEN 95 WHEN 'done' THEN 10 ELSE 60 END + " +
+                    "IFNULL(s.starred,0) * 85 + " +
+                    "CASE WHEN IFNULL(s.memo,'') <> '' THEN 35 ELSE 0 END + " +
+                    "CASE WHEN " + frequency + " >= 5 THEN 75 WHEN " + frequency + " >= 3 THEN 50 WHEN " + frequency + " >= 2 THEN 25 ELSE 0 END + " +
+                    coreScoreSql() + " + " + recency + " + " + due + " + " + failure +
+                    ")";
+        }
+
+        private String coreScoreSql() {
+            StringBuilder where = new StringBuilder();
+            for (String keyword : StudyPolicy.CORE_KEYWORDS) {
+                if (where.length() > 0) where.append(" OR ");
+                where.append("q.search LIKE '%").append(sqlLikeLiteral(normalize(keyword))).append("%'");
+            }
+            return "(CASE WHEN " + where + " THEN 45 ELSE 0 END)";
+        }
+
+        private String weakTagSql() {
+            StringBuilder where = new StringBuilder();
+            for (String tag : StudyPolicy.WEAK_REVIEW_TAGS) {
+                if (where.length() > 0) where.append(" OR ");
+                where.append("IFNULL(s.selfTags,'') LIKE '%").append(sqlLikeLiteral(tag)).append("%'");
+            }
+            return "(" + where + ")";
         }
 
         List<KeywordRow> frequentRows(int subject, int limit) {

@@ -30,5 +30,21 @@ final class StudyPolicy {
             {"보일러", "boiler"}
     };
 
+    static final String[] CORE_KEYWORDS = {
+            "보호", "계전", "전압", "전류", "고장", "단락", "접지", "피뢰",
+            "안정도", "무효전력", "주파수", "발전기", "터빈", "보일러",
+            "ESS", "분산형전원", "계통연계", "HVDC", "STATCOM", "SVC"
+    };
+
+    static final String[] STUDY_KEYWORD_CANDIDATES = {
+            "정의", "원리", "특징", "장점", "단점", "문제점", "대책",
+            "보호장치", "전압", "전류", "주파수", "고장전류", "단락용량",
+            "FRT", "단독운전", "피뢰기", "접지", "계통연계", "무효전력"
+    };
+
+    static final String[] WEAK_REVIEW_TAGS = {
+            "시간 초과", "키워드 누락", "계산 실수", "개념 불안"
+    };
+
     private StudyPolicy() {}
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 24.0
+
+- Added a dedicated "오늘 약점 큐" screen for due, weak, starred, low-grade, slow, and tagged questions.
+- Improved recommendation ranking with self-evaluation, elapsed time, review due date, and weak-review tags.
+- Centralized core keywords, study keyword candidates, and weak-review tags in `StudyPolicy`.
+- Expanded search token handling with keyword aliases and technical abbreviations.
+
 ## 23.0
 
 - Added runtime repair for legacy mojibake question data before display and search indexing.
