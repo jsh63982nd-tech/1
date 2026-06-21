@@ -289,7 +289,9 @@ public class MainActivity extends Activity {
 
         Stats stats = db.stats();
         body.addView(section("학습 현황"));
-        body.addView(learningCard("전체 " + stats.total + "문제\n미회독 " + stats.unseen + " · 완료 " + stats.done + " · 취약 " + stats.weak + " · 별표 " + stats.starred, 16, true));
+        body.addView(learningCard(homeStatusText(stats), 16, true));
+        body.addView(section("오늘 볼 것"));
+        body.addView(learningCard(homeFocusText(stats), 15, false));
 
         body.addView(section("바로 시작"));
         body.addView(actionButton("미회독 시작", v -> {
@@ -310,6 +312,35 @@ public class MainActivity extends Activity {
         for (Question q : db.recommended(5)) {
             body.addView(recommendationButton(q, v -> showDetail(q.id)));
         }
+    }
+
+    private String homeStatusText(Stats stats) {
+        return "전체 " + stats.total + "문제\n" +
+                "미회독 " + stats.unseen + " · 완료 " + stats.done + " · 취약 " + stats.weak + " · 별표 " + stats.starred + "\n" +
+                "복습 도래 " + stats.due + " · 실전 기록 " + stats.timed + " · 자가평가 " + stats.graded;
+    }
+
+    private String homeFocusText(Stats stats) {
+        List<String> lines = new ArrayList<>();
+        if (stats.due > 0) {
+            lines.add("복습 도래 " + stats.due + "문제부터 처리");
+        } else {
+            lines.add("복습 도래 문제 없음");
+        }
+        if (stats.weak > 0) {
+            lines.add("취약 " + stats.weak + "문제 재회독");
+        }
+        if (stats.lowGrade > 0 || stats.timeOver > 0 || stats.keywordMiss > 0) {
+            lines.add("자가평가 보완: 하 " + stats.lowGrade + " · 시간 초과 " + stats.timeOver + " · 키워드 누락 " + stats.keywordMiss);
+        } else {
+            lines.add("최근 자가평가 위험 신호 없음");
+        }
+        if (stats.timed > 0) {
+            lines.add("실전 기록 " + stats.timed + "문제 · 평균 " + formatDuration(stats.avgElapsedSeconds));
+        } else {
+            lines.add("문제 상세에서 10분/25분 타이머를 시작해 실전 기록을 남기세요");
+        }
+        return String.join("\n", lines);
     }
 
     private void showTimer() {
@@ -1469,6 +1500,12 @@ public class MainActivity extends Activity {
         int weak;
         int due;
         int starred;
+        int timed;
+        int graded;
+        int lowGrade;
+        int timeOver;
+        int keywordMiss;
+        int avgElapsedSeconds;
     }
 
     private class QuestionAdapter extends BaseAdapter {
@@ -1707,6 +1744,12 @@ public class MainActivity extends Activity {
             stats.weak = stateCount(FILTER_WEAK);
             stats.due = scalarInt(database, "SELECT COUNT(*) FROM state WHERE dueAt IS NOT NULL AND dueAt <> '' AND dueAt <= date('now')");
             stats.starred = scalarInt(database, "SELECT COUNT(*) FROM state WHERE starred=1");
+            stats.timed = scalarInt(database, "SELECT COUNT(*) FROM state WHERE elapsedSeconds > 0");
+            stats.graded = scalarInt(database, "SELECT COUNT(*) FROM state WHERE IFNULL(selfGrade,'') <> ''");
+            stats.lowGrade = scalarInt(database, "SELECT COUNT(*) FROM state WHERE selfGrade='하'");
+            stats.timeOver = scalarInt(database, "SELECT COUNT(*) FROM state WHERE IFNULL(selfTags,'') LIKE '%시간 초과%'");
+            stats.keywordMiss = scalarInt(database, "SELECT COUNT(*) FROM state WHERE IFNULL(selfTags,'') LIKE '%키워드 누락%'");
+            stats.avgElapsedSeconds = scalarInt(database, "SELECT IFNULL(CAST(AVG(elapsedSeconds) AS INTEGER),0) FROM state WHERE elapsedSeconds > 0");
             stats.unseen = stats.total - stats.done - stats.weak;
             return stats;
         }
