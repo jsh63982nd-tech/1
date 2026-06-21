@@ -9,6 +9,7 @@ import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.CountDownTimer;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.text.Editable;
@@ -52,13 +53,40 @@ public class MainActivity extends Activity {
     private static final int SUBJECT_SONG = 1;
     private static final int SUBJECT_GEN = 2;
     private static final int SUBJECT_GRID = 4;
-    private static final int QUESTION_SEARCH_SCHEMA = 2;
+    private static final int QUESTION_SEARCH_SCHEMA = 3;
     private static final String SELECTED_SUFFIX = " (선택됨)";
 
     private static final String[] SUBJECT_NAMES = {"송배전공학", "발전공학", "계통공학"};
     private static final String[] SONG_TERMS = {"송전", "배전", "변전", "케이블", "전선", "피뢰", "접지", "차단", "계전", "보호", "분산형전원", "계통연계", "FRT", "전압", "고장"};
     private static final String[] GEN_TERMS = {"발전", "발전기", "화력", "수력", "원자력", "태양광", "풍력", "터빈", "보일러", "수차", "ESS", "연료전지"};
     private static final String[] GRID_TERMS = {"계통", "조류", "안정도", "주파수", "무효전력", "고조파", "전력시장", "예비력", "신뢰도", "HVDC", "STATCOM", "SVC"};
+    private static final int[] REVIEW_INTERVAL_DAYS = {1, 3, 7, 14, 30};
+    private static final String[][] KEYWORD_ALIASES = {
+            {"전력용콘덴서", "콘덴서 SC capacitor"},
+            {"콘덴서", "전력용콘덴서 SC capacitor"},
+            {"보호계전", "계전기 보호릴레이 relay"},
+            {"계전기", "보호계전 relay"},
+            {"과전류", "OCR 50 51 overcurrent"},
+            {"접지", "중성점접지 grounding earth"},
+            {"중성점", "접지 NGR"},
+            {"변압기", "transformer TR"},
+            {"피뢰기", "LA surge arrester"},
+            {"차단기", "CB breaker"},
+            {"전압", "voltage V"},
+            {"전류", "current I"},
+            {"단락", "short circuit 고장"},
+            {"고장", "fault 단락 지락"},
+            {"HVDC", "직류송전 고압직류"},
+            {"STATCOM", "무효전력 보상 FACTS"},
+            {"SVC", "무효전력 보상 FACTS"},
+            {"ESS", "에너지저장장치 storage"},
+            {"분산형전원", "DER DG 계통연계"},
+            {"태양광", "PV 인버터"},
+            {"풍력", "wind"},
+            {"원자력", "nuclear"},
+            {"터빈", "turbine"},
+            {"보일러", "boiler"}
+    };
     private static final String[][] LITERAL_SPACING_FIXES = {
             {"SpecialProtectionSystem", "Special Protection System"},
             {"EnergyStorageSystem", "Energy Storage System"},
@@ -200,6 +228,9 @@ public class MainActivity extends Activity {
     private boolean exerciseFormulaOnly = false;
     private boolean exerciseReviewOnly = false;
     private boolean exerciseHideReviewNeeded = true;
+    private CountDownTimer answerTimer;
+    private TextView timerText;
+    private int timerMinutes = 10;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -213,6 +244,12 @@ public class MainActivity extends Activity {
         loadTextbookExercises();
         buildShell();
         showHome();
+    }
+
+    @Override
+    protected void onDestroy() {
+        stopAnswerTimer();
+        super.onDestroy();
     }
 
     private void buildShell() {
@@ -231,6 +268,7 @@ public class MainActivity extends Activity {
         nav.addView(navButton("홈", v -> showHome()));
         nav.addView(navButton("문제", v -> showQuestions()));
         nav.addView(navButton("빈출", v -> showFrequent()));
+        nav.addView(navButton("타이머", v -> showTimer()));
         nav.addView(navButton("교재 문제", v -> showTextbookExercises()));
         nav.addView(navButton("통계", v -> showStats()));
         navScroll.addView(nav);
@@ -269,6 +307,41 @@ public class MainActivity extends Activity {
         for (Question q : db.recommended(5)) {
             body.addView(recommendationButton(q, v -> showDetail(q.id)));
         }
+    }
+
+    private void showTimer() {
+        LinearLayout body = paddedColumn();
+        screen.removeAllViews();
+        screen.addView(wrapScroll(body));
+
+        body.addView(section("실전 답안 타이머"));
+        body.addView(muted("10분은 목차 잡기, 25분은 실전 답안 작성 기준입니다."));
+        timerText = text(formatTimer(timerMinutes * 60), 42, true);
+        timerText.setGravity(Gravity.CENTER);
+        timerText.setPadding(0, dp(22), 0, dp(22));
+        body.addView(timerText, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout presets = row();
+        presets.addView(smallButton(selectedLabel("10분 목차", timerMinutes == 10), v -> {
+            timerMinutes = 10;
+            resetTimerText();
+        }));
+        presets.addView(smallButton(selectedLabel("25분 실전", timerMinutes == 25), v -> {
+            timerMinutes = 25;
+            resetTimerText();
+        }));
+        presets.addView(smallButton(selectedLabel("50분 2문제", timerMinutes == 50), v -> {
+            timerMinutes = 50;
+            resetTimerText();
+        }));
+        body.addView(presets);
+
+        body.addView(actionButton("시작", v -> startAnswerTimer(timerMinutes)));
+        body.addView(actionButton("정지", v -> stopAnswerTimer()));
+        body.addView(actionButton("초기화", v -> {
+            stopAnswerTimer();
+            resetTimerText();
+        }));
     }
 
     private void showQuestions() {
@@ -503,7 +576,7 @@ public class MainActivity extends Activity {
 
         Stats stats = db.stats();
         body.addView(section("통계"));
-        body.addView(card("전체 " + stats.total + "\n미회독 " + stats.unseen + "\n완료 " + stats.done + "\n취약 " + stats.weak + "\n별표 " + stats.starred));
+        body.addView(card("전체 " + stats.total + "\n미회독 " + stats.unseen + "\n완료 " + stats.done + "\n취약 " + stats.weak + "\n복습 예정/도래 " + stats.due + "\n별표 " + stats.starred));
         body.addView(section("과목 추정"));
         body.addView(card("송배전공학 " + db.subjectCount(SUBJECT_SONG) + "문제\n발전공학 " + db.subjectCount(SUBJECT_GEN) + "문제\n계통공학 " + db.subjectCount(SUBJECT_GRID) + "문제"));
         body.addView(section("교재 문제"));
@@ -801,6 +874,47 @@ public class MainActivity extends Activity {
         return label.replace(SELECTED_SUFFIX, "");
     }
 
+    private void startAnswerTimer(int minutes) {
+        stopAnswerTimer();
+        long millis = Math.max(1, minutes) * 60L * 1000L;
+        answerTimer = new CountDownTimer(millis, 1000L) {
+            @Override
+            public void onTick(long millisUntilFinished) {
+                updateTimerText(formatTimer((int) Math.ceil(millisUntilFinished / 1000.0)));
+            }
+
+            @Override
+            public void onFinish() {
+                updateTimerText("00:00");
+                Toast.makeText(MainActivity.this, "답안 작성 시간이 끝났습니다.", Toast.LENGTH_LONG).show();
+            }
+        };
+        answerTimer.start();
+    }
+
+    private void stopAnswerTimer() {
+        if (answerTimer != null) {
+            answerTimer.cancel();
+            answerTimer = null;
+        }
+    }
+
+    private void resetTimerText() {
+        stopAnswerTimer();
+        updateTimerText(formatTimer(timerMinutes * 60));
+    }
+
+    private void updateTimerText(String value) {
+        if (timerText != null) {
+            timerText.setText(value);
+        }
+    }
+
+    private String formatTimer(int totalSeconds) {
+        int seconds = Math.max(0, totalSeconds);
+        return String.format(Locale.KOREA, "%02d:%02d", seconds / 60, seconds % 60);
+    }
+
     private Button questionButton(Question q, View.OnClickListener listener) {
         Button button = actionButton(q.round + " · " + q.keyword + " · " + statusLabel(q.status) + "\n" + q.displayQuestion, listener);
         button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -906,6 +1020,7 @@ public class MainActivity extends Activity {
         } else if (FILTER_DONE.equals(q.status) && reviewAgeDays(q.reviewedAt) >= 7) {
             reasons.add("복습 주기");
         }
+        if (q.dueAt != null && q.dueAt.length() > 0 && daysUntil(q.dueAt) <= 0) reasons.add("복습일 도래");
         if (q.starred) reasons.add("별표");
         if (q.frequency >= 3) reasons.add("빈출 키워드");
         if (hasCoreKeyword(q)) reasons.add("핵심 키워드");
@@ -919,6 +1034,11 @@ public class MainActivity extends Activity {
             return "복습 상태: 취약 문제 · 우선 회독 권장";
         }
         if (FILTER_DONE.equals(q.status)) {
+            if (q.dueAt != null && q.dueAt.length() > 0) {
+                int dueDays = daysUntil(q.dueAt);
+                if (dueDays <= 0) return "복습 상태: 다음 복습일 도래 · " + q.reviewCount + "회독";
+                return "복습 상태: " + q.reviewCount + "회독 · " + dueDays + "일 뒤 복습";
+            }
             int days = reviewAgeDays(q.reviewedAt);
             if (days >= 14) return "복습 상태: 완료 후 " + days + "일 경과 · 장기 복습 대상";
             if (days >= 7) return "복습 상태: 완료 후 " + days + "일 경과 · 복습 주기 도래";
@@ -946,6 +1066,22 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {
             return 999;
         }
+    }
+
+    private int daysUntil(String date) {
+        if (date == null || date.length() == 0) return 999;
+        try {
+            Date target = new SimpleDateFormat("yyyy-MM-dd", Locale.KOREA).parse(date);
+            if (target == null) return 999;
+            long diff = target.getTime() - new Date().getTime();
+            return (int) Math.ceil(diff / (1000.0 * 60.0 * 60.0 * 24.0));
+        } catch (Exception ignored) {
+            return 999;
+        }
+    }
+
+    private String addDays(int days) {
+        return new SimpleDateFormat("yyyy-MM-dd", Locale.KOREA).format(new Date(new Date().getTime() + days * 24L * 60L * 60L * 1000L));
     }
 
     private String cleanQuestion(String value) {
@@ -1029,6 +1165,19 @@ public class MainActivity extends Activity {
                 .replace("피뢰", " 피뢰 ")
                 .replaceAll("\\s{2,}", " ")
                 .trim();
+    }
+
+    private String aliasText(String value) {
+        String source = String.valueOf(value);
+        String compact = normalize(source);
+        StringBuilder aliases = new StringBuilder();
+        for (String[] row : KEYWORD_ALIASES) {
+            String key = row[0];
+            if (source.contains(key) || compact.contains(normalize(key))) {
+                aliases.append(' ').append(row[1]);
+            }
+        }
+        return aliases.toString();
     }
 
     private static String sqlLiteral(String value) {
@@ -1151,6 +1300,8 @@ public class MainActivity extends Activity {
         boolean starred;
         String memo;
         String reviewedAt;
+        String dueAt;
+        int reviewCount;
         int frequency;
         String displayQuestion;
         String recommendationReason;
@@ -1180,6 +1331,7 @@ public class MainActivity extends Activity {
         int unseen;
         int done;
         int weak;
+        int due;
         int starred;
     }
 
@@ -1255,6 +1407,7 @@ public class MainActivity extends Activity {
 
         void seedIfNeeded() {
             SQLiteDatabase database = getWritableDatabase();
+            ensureSchema(database);
             JSONArray array;
             try {
                 array = readAssetQuestions();
@@ -1280,10 +1433,25 @@ public class MainActivity extends Activity {
             database.execSQL("CREATE TABLE IF NOT EXISTS questions(id TEXT PRIMARY KEY, round TEXT, category TEXT, keyword TEXT, question TEXT, search TEXT, subject INTEGER)");
             database.execSQL("CREATE TABLE IF NOT EXISTS state(id TEXT PRIMARY KEY, status TEXT, starred INTEGER, memo TEXT, reviewedAt TEXT)");
             database.execSQL("CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT)");
+            ensureColumn(database, "state", "reviewCount", "INTEGER DEFAULT 0");
+            ensureColumn(database, "state", "dueAt", "TEXT");
             database.execSQL("CREATE INDEX IF NOT EXISTS idx_questions_search ON questions(search)");
             database.execSQL("CREATE INDEX IF NOT EXISTS idx_questions_keyword ON questions(keyword)");
             database.execSQL("CREATE INDEX IF NOT EXISTS idx_questions_subject ON questions(subject)");
             database.execSQL("CREATE INDEX IF NOT EXISTS idx_state_status ON state(status)");
+            database.execSQL("CREATE INDEX IF NOT EXISTS idx_state_dueAt ON state(dueAt)");
+        }
+
+        private void ensureColumn(SQLiteDatabase database, String table, String column, String definition) {
+            Cursor cursor = database.rawQuery("PRAGMA table_info(" + table + ")", null);
+            try {
+                while (cursor.moveToNext()) {
+                    if (column.equals(cursor.getString(1))) return;
+                }
+            } finally {
+                cursor.close();
+            }
+            database.execSQL("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
         }
 
         private void rebuildQuestions(SQLiteDatabase database, JSONArray array) throws Exception {
@@ -1296,7 +1464,8 @@ public class MainActivity extends Activity {
                 String keyword = normalizeKeyword(obj.optString("keyword"));
                 String question = obj.optString("question");
                 String cleaned = cleanQuestion(question);
-                String search = normalize(round + " " + category + " " + keyword + " " + splitCompactKorean(keyword) + " " + question + " " + cleaned);
+                String searchSource = round + " " + category + " " + keyword + " " + splitCompactKorean(keyword) + " " + question + " " + cleaned;
+                String search = normalize(searchSource + " " + aliasText(searchSource));
                 int subject = computeSubjectMask(category + keyword + question + cleaned);
                 ContentValues values = new ContentValues();
                 values.put("id", id);
@@ -1344,15 +1513,16 @@ public class MainActivity extends Activity {
             String frequency = "(SELECT COUNT(*) FROM questions k WHERE k.keyword=q.keyword)";
             String core = "(CASE WHEN q.search LIKE '%보호%' OR q.search LIKE '%계전%' OR q.search LIKE '%전압%' OR q.search LIKE '%고장%' OR q.search LIKE '%단락%' OR q.search LIKE '%접지%' OR q.search LIKE '%안정도%' OR q.search LIKE '%주파수%' THEN 45 ELSE 0 END)";
             String recency = "(CASE WHEN IFNULL(s.status,'unseen')='done' AND IFNULL(s.reviewedAt,'') <> '' THEN CAST(julianday('now') - julianday(s.reviewedAt) AS INTEGER) * 4 ELSE 0 END)";
+            String due = "(CASE WHEN IFNULL(s.dueAt,'') <> '' AND s.dueAt <= date('now') THEN 220 ELSE 0 END)";
             String score = "(" +
                     "CASE IFNULL(s.status,'unseen') WHEN 'weak' THEN 180 WHEN 'unseen' THEN 100 WHEN 'done' THEN 10 ELSE 60 END + " +
                     "IFNULL(s.starred,0) * 80 + " +
                     "CASE WHEN IFNULL(s.memo,'') <> '' THEN 35 ELSE 0 END + " +
                     "CASE WHEN " + frequency + " >= 5 THEN 70 WHEN " + frequency + " >= 3 THEN 45 WHEN " + frequency + " >= 2 THEN 25 ELSE 0 END + " +
-                    core + " + " + recency +
+                    core + " + " + recency + " + " + due +
                     ")";
             List<Question> rows = query(
-                    "IFNULL(s.status,'unseen') != 'done' OR s.reviewedAt IS NULL OR s.reviewedAt <= date('now','-7 day')",
+                    "IFNULL(s.status,'unseen') != 'done' OR (IFNULL(s.dueAt,'') <> '' AND s.dueAt <= date('now')) OR s.reviewedAt IS NULL OR s.reviewedAt <= date('now','-7 day')",
                     new String[0],
                     score + " DESC, CASE IFNULL(s.status,'unseen') WHEN 'weak' THEN 0 WHEN 'unseen' THEN 1 ELSE 2 END, q.round, q.id",
                     limit
@@ -1396,6 +1566,7 @@ public class MainActivity extends Activity {
             stats.total = scalarInt(database, "SELECT COUNT(*) FROM questions");
             stats.done = stateCount(FILTER_DONE);
             stats.weak = stateCount(FILTER_WEAK);
+            stats.due = scalarInt(database, "SELECT COUNT(*) FROM state WHERE dueAt IS NOT NULL AND dueAt <> '' AND dueAt <= date('now')");
             stats.starred = scalarInt(database, "SELECT COUNT(*) FROM state WHERE starred=1");
             stats.unseen = stats.total - stats.done - stats.weak;
             return stats;
@@ -1404,8 +1575,16 @@ public class MainActivity extends Activity {
         void setStatus(String id, String status) {
             ContentValues values = stateValues(id);
             values.put("status", status);
+            int reviewCount = Math.max(0, values.getAsInteger("reviewCount") == null ? 0 : values.getAsInteger("reviewCount"));
             if (FILTER_DONE.equals(status)) {
+                reviewCount += 1;
                 values.put("reviewedAt", new SimpleDateFormat("yyyy-MM-dd", Locale.KOREA).format(new Date()));
+                values.put("reviewCount", reviewCount);
+                values.put("dueAt", addDays(REVIEW_INTERVAL_DAYS[Math.min(reviewCount - 1, REVIEW_INTERVAL_DAYS.length - 1)]));
+            } else if (FILTER_WEAK.equals(status)) {
+                values.put("dueAt", addDays(1));
+            } else if (FILTER_UNSEEN.equals(status)) {
+                values.putNull("dueAt");
             }
             getWritableDatabase().insertWithOnConflict("state", null, values, SQLiteDatabase.CONFLICT_REPLACE);
         }
@@ -1429,9 +1608,14 @@ public class MainActivity extends Activity {
             values.put("status", existing.getAsString("status"));
             values.put("starred", existing.getAsInteger("starred"));
             values.put("memo", existing.getAsString("memo"));
+            values.put("reviewCount", existing.getAsInteger("reviewCount"));
             String reviewedAt = existing.getAsString("reviewedAt");
             if (reviewedAt != null) {
                 values.put("reviewedAt", reviewedAt);
+            }
+            String dueAt = existing.getAsString("dueAt");
+            if (dueAt != null) {
+                values.put("dueAt", dueAt);
             }
             return values;
         }
@@ -1441,7 +1625,8 @@ public class MainActivity extends Activity {
             values.put("status", FILTER_UNSEEN);
             values.put("starred", 0);
             values.put("memo", "");
-            Cursor cursor = getReadableDatabase().rawQuery("SELECT status,starred,memo,reviewedAt FROM state WHERE id=?", new String[]{id});
+            values.put("reviewCount", 0);
+            Cursor cursor = getReadableDatabase().rawQuery("SELECT status,starred,memo,reviewedAt,reviewCount,dueAt FROM state WHERE id=?", new String[]{id});
             try {
                 if (cursor.moveToFirst()) {
                     values.put("status", cursor.getString(0));
@@ -1449,6 +1634,10 @@ public class MainActivity extends Activity {
                     values.put("memo", cursor.getString(2));
                     if (!cursor.isNull(3)) {
                         values.put("reviewedAt", cursor.getString(3));
+                    }
+                    values.put("reviewCount", cursor.isNull(4) ? 0 : cursor.getInt(4));
+                    if (!cursor.isNull(5)) {
+                        values.put("dueAt", cursor.getString(5));
                     }
                 }
             } finally {
@@ -1460,7 +1649,7 @@ public class MainActivity extends Activity {
         JSONObject exportStateJson() throws Exception {
             JSONObject root = new JSONObject();
             JSONArray states = new JSONArray();
-            Cursor cursor = getReadableDatabase().rawQuery("SELECT id,status,starred,memo,reviewedAt FROM state ORDER BY id", null);
+            Cursor cursor = getReadableDatabase().rawQuery("SELECT id,status,starred,memo,reviewedAt,reviewCount,dueAt FROM state ORDER BY id", null);
             try {
                 while (cursor.moveToNext()) {
                     JSONObject row = new JSONObject();
@@ -1470,6 +1659,10 @@ public class MainActivity extends Activity {
                     row.put("memo", cursor.getString(3));
                     if (!cursor.isNull(4)) {
                         row.put("reviewedAt", cursor.getString(4));
+                    }
+                    row.put("reviewCount", cursor.isNull(5) ? 0 : cursor.getInt(5));
+                    if (!cursor.isNull(6)) {
+                        row.put("dueAt", cursor.getString(6));
                     }
                     states.put(row);
                 }
@@ -1513,6 +1706,11 @@ public class MainActivity extends Activity {
                     if (reviewedAt.length() > 0) {
                         values.put("reviewedAt", reviewedAt);
                     }
+                    values.put("reviewCount", Math.max(0, row.optInt("reviewCount", 0)));
+                    String dueAt = row.optString("dueAt", "");
+                    if (dueAt.length() > 0) {
+                        values.put("dueAt", dueAt);
+                    }
                     database.insertWithOnConflict("state", null, values, SQLiteDatabase.CONFLICT_REPLACE);
                 }
                 database.setTransactionSuccessful();
@@ -1541,7 +1739,7 @@ public class MainActivity extends Activity {
 
         private List<Question> query(String where, String[] args, String order, int limit) {
             SQLiteDatabase database = getReadableDatabase();
-            String sql = "SELECT q.id,q.round,q.category,q.keyword,q.question,IFNULL(s.status,'unseen'),IFNULL(s.starred,0),IFNULL(s.memo,''),(SELECT COUNT(*) FROM questions k WHERE k.keyword=q.keyword),IFNULL(s.reviewedAt,'') " +
+            String sql = "SELECT q.id,q.round,q.category,q.keyword,q.question,IFNULL(s.status,'unseen'),IFNULL(s.starred,0),IFNULL(s.memo,''),(SELECT COUNT(*) FROM questions k WHERE k.keyword=q.keyword),IFNULL(s.reviewedAt,''),IFNULL(s.reviewCount,0),IFNULL(s.dueAt,'') " +
                     "FROM questions q LEFT JOIN state s ON s.id=q.id WHERE " + where + " ORDER BY " + order + " LIMIT " + limit;
             Cursor cursor = database.rawQuery(sql, args);
             List<Question> rows = new ArrayList<>();
@@ -1565,6 +1763,8 @@ public class MainActivity extends Activity {
             q.memo = cursor.getString(7);
             q.frequency = cursor.getInt(8);
             q.reviewedAt = cursor.getString(9);
+            q.reviewCount = cursor.getInt(10);
+            q.dueAt = cursor.getString(11);
             q.displayQuestion = cleanQuestion(q.question);
             return q;
         }

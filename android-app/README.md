@@ -13,7 +13,7 @@
 
 ## GitHub Actions 빌드
 
-저장소의 `Build Android APK` 워크플로가 Android SDK와 Gradle 8.10.2를 설치한 뒤 `gradle assembleDebug`를 실행합니다. 빌드 결과는 Actions artifact로 업로드되고, `apk/power-exam-review-debug.apk`에도 복사됩니다.
+저장소의 `Build Android APK` 워크플로가 Android SDK와 Gradle 8.10.2를 설치한 뒤 `gradle assembleDebug assembleRelease`를 실행합니다. 빌드 결과는 Actions artifact로 업로드되고, `apk/power-exam-review-debug.apk`와 `apk/power-exam-review-release-unsigned.apk`에도 복사됩니다.
 
 ## 로컬 빌드
 
@@ -21,7 +21,7 @@
 
 ```powershell
 cd android-app
-gradle assembleDebug
+gradle assembleDebug assembleRelease
 ```
 
 Windows에서는 같은 조건에서 보조 스크립트를 사용할 수 있습니다.
