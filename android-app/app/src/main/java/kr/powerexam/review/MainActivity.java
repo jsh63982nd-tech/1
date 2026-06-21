@@ -231,6 +231,9 @@ public class MainActivity extends Activity {
     private CountDownTimer answerTimer;
     private TextView timerText;
     private int timerMinutes = 10;
+    private String activeTimerQuestionId = "";
+    private int timerPlannedSeconds = 0;
+    private int timerRemainingSeconds = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -423,6 +426,11 @@ public class MainActivity extends Activity {
 
         body.addView(section("답안 구성"));
         body.addView(learningCard(answerTemplate(q), 15, false));
+
+        body.addView(section("실전 기록"));
+        body.addView(learningCard(practiceStatusText(q), 15, false));
+        body.addView(practiceTimerButtons(q));
+        body.addView(selfReviewButtons(q));
 
         String summary = summaryText(q.id);
         if (summary.length() > 0) {
@@ -874,18 +882,113 @@ public class MainActivity extends Activity {
         return label.replace(SELECTED_SUFFIX, "");
     }
 
+    private LinearLayout practiceTimerButtons(Question q) {
+        LinearLayout row = row();
+        row.addView(smallButton("10분 시작", v -> startQuestionTimer(q.id, 10)));
+        row.addView(smallButton("25분 시작", v -> startQuestionTimer(q.id, 25)));
+        row.addView(smallButton("정지 저장", v -> stopQuestionTimer(true)));
+        return row;
+    }
+
+    private LinearLayout selfReviewButtons(Question q) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout grades = row();
+        grades.addView(smallButton(selectedLabel("상", "상".equals(q.selfGrade)), v -> {
+            db.setSelfReview(q.id, "상", q.selfTags);
+            showDetail(q.id);
+        }));
+        grades.addView(smallButton(selectedLabel("중", "중".equals(q.selfGrade)), v -> {
+            db.setSelfReview(q.id, "중", q.selfTags);
+            showDetail(q.id);
+        }));
+        grades.addView(smallButton(selectedLabel("하", "하".equals(q.selfGrade)), v -> {
+            db.setSelfReview(q.id, "하", q.selfTags);
+            db.setStatus(q.id, FILTER_WEAK);
+            showDetail(q.id);
+        }));
+        box.addView(grades);
+
+        LinearLayout tags = row();
+        String[] options = {"목차 부족", "키워드 누락", "계산 실수", "시간 초과"};
+        for (String option : options) {
+            tags.addView(smallButton(selectedLabel(option, hasTag(q.selfTags, option)), v -> {
+                db.setSelfReview(q.id, q.selfGrade, toggleTag(q.selfTags, ((Button) v).getText().toString().replace(SELECTED_SUFFIX, "")));
+                showDetail(q.id);
+            }));
+        }
+        box.addView(tags);
+        return box;
+    }
+
+    private String practiceStatusText(Question q) {
+        List<String> lines = new ArrayList<>();
+        lines.add("최근 소요 시간: " + (q.elapsedSeconds > 0 ? formatDuration(q.elapsedSeconds) : "기록 없음"));
+        lines.add("자가평가: " + (q.selfGrade == null || q.selfGrade.length() == 0 ? "미입력" : q.selfGrade));
+        lines.add("체크: " + (q.selfTags == null || q.selfTags.length() == 0 ? "없음" : q.selfTags));
+        if (activeTimerQuestionId.equals(q.id)) {
+            lines.add("타이머 진행 중: " + formatTimer(timerRemainingSeconds));
+        }
+        return String.join("\n", lines);
+    }
+
+    private void startQuestionTimer(String questionId, int minutes) {
+        activeTimerQuestionId = questionId;
+        timerPlannedSeconds = Math.max(1, minutes) * 60;
+        timerRemainingSeconds = timerPlannedSeconds;
+        startAnswerTimer(minutes);
+        Toast.makeText(this, minutes + "분 문제 타이머를 시작했습니다.", Toast.LENGTH_SHORT).show();
+        showDetail(questionId);
+    }
+
+    private void stopQuestionTimer(boolean save) {
+        String questionId = activeTimerQuestionId;
+        int elapsed = Math.max(0, timerPlannedSeconds - timerRemainingSeconds);
+        stopAnswerTimer();
+        activeTimerQuestionId = "";
+        timerPlannedSeconds = 0;
+        timerRemainingSeconds = 0;
+        if (save && questionId.length() > 0 && elapsed > 0) {
+            db.setElapsedSeconds(questionId, elapsed);
+            Toast.makeText(this, "소요 시간을 저장했습니다.", Toast.LENGTH_SHORT).show();
+            showDetail(questionId);
+        }
+    }
+
+    private void saveActiveQuestionTimerIfMatches(String questionId) {
+        if (!questionId.equals(activeTimerQuestionId)) return;
+        int elapsed = Math.max(0, timerPlannedSeconds - timerRemainingSeconds);
+        stopAnswerTimer();
+        activeTimerQuestionId = "";
+        timerPlannedSeconds = 0;
+        timerRemainingSeconds = 0;
+        if (elapsed > 0) {
+            db.setElapsedSeconds(questionId, elapsed);
+        }
+    }
+
     private void startAnswerTimer(int minutes) {
         stopAnswerTimer();
         long millis = Math.max(1, minutes) * 60L * 1000L;
         answerTimer = new CountDownTimer(millis, 1000L) {
             @Override
             public void onTick(long millisUntilFinished) {
-                updateTimerText(formatTimer((int) Math.ceil(millisUntilFinished / 1000.0)));
+                timerRemainingSeconds = (int) Math.ceil(millisUntilFinished / 1000.0);
+                updateTimerText(formatTimer(timerRemainingSeconds));
             }
 
             @Override
             public void onFinish() {
+                timerRemainingSeconds = 0;
                 updateTimerText("00:00");
+                if (activeTimerQuestionId.length() > 0) {
+                    String questionId = activeTimerQuestionId;
+                    int elapsed = timerPlannedSeconds;
+                    activeTimerQuestionId = "";
+                    timerPlannedSeconds = 0;
+                    db.setElapsedSeconds(questionId, elapsed);
+                }
                 Toast.makeText(MainActivity.this, "답안 작성 시간이 끝났습니다.", Toast.LENGTH_LONG).show();
             }
         };
@@ -913,6 +1016,35 @@ public class MainActivity extends Activity {
     private String formatTimer(int totalSeconds) {
         int seconds = Math.max(0, totalSeconds);
         return String.format(Locale.KOREA, "%02d:%02d", seconds / 60, seconds % 60);
+    }
+
+    private String formatDuration(int totalSeconds) {
+        int seconds = Math.max(0, totalSeconds);
+        return String.format(Locale.KOREA, "%d분 %02d초", seconds / 60, seconds % 60);
+    }
+
+    private boolean hasTag(String tags, String tag) {
+        if (tags == null || tags.length() == 0) return false;
+        for (String item : tags.split(" · ")) {
+            if (tag.equals(item)) return true;
+        }
+        return false;
+    }
+
+    private String toggleTag(String tags, String tag) {
+        List<String> rows = new ArrayList<>();
+        boolean removed = false;
+        if (tags != null && tags.length() > 0) {
+            for (String item : tags.split(" · ")) {
+                if (tag.equals(item)) {
+                    removed = true;
+                } else if (item.length() > 0) {
+                    rows.add(item);
+                }
+            }
+        }
+        if (!removed) rows.add(tag);
+        return String.join(" · ", rows);
     }
 
     private Button questionButton(Question q, View.OnClickListener listener) {
@@ -948,6 +1080,7 @@ public class MainActivity extends Activity {
             showDetail(q.id);
         });
         addBarButton(bar, "회독 완료", v -> {
+            saveActiveQuestionTimerIfMatches(q.id);
             db.setStatus(q.id, FILTER_DONE);
             showDetail(q.id);
         });
@@ -1302,6 +1435,9 @@ public class MainActivity extends Activity {
         String reviewedAt;
         String dueAt;
         int reviewCount;
+        int elapsedSeconds;
+        String selfGrade;
+        String selfTags;
         int frequency;
         String displayQuestion;
         String recommendationReason;
@@ -1435,6 +1571,9 @@ public class MainActivity extends Activity {
             database.execSQL("CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT)");
             ensureColumn(database, "state", "reviewCount", "INTEGER DEFAULT 0");
             ensureColumn(database, "state", "dueAt", "TEXT");
+            ensureColumn(database, "state", "elapsedSeconds", "INTEGER DEFAULT 0");
+            ensureColumn(database, "state", "selfGrade", "TEXT");
+            ensureColumn(database, "state", "selfTags", "TEXT");
             database.execSQL("CREATE INDEX IF NOT EXISTS idx_questions_search ON questions(search)");
             database.execSQL("CREATE INDEX IF NOT EXISTS idx_questions_keyword ON questions(keyword)");
             database.execSQL("CREATE INDEX IF NOT EXISTS idx_questions_subject ON questions(subject)");
@@ -1601,6 +1740,19 @@ public class MainActivity extends Activity {
             getWritableDatabase().insertWithOnConflict("state", null, values, SQLiteDatabase.CONFLICT_REPLACE);
         }
 
+        void setElapsedSeconds(String id, int seconds) {
+            ContentValues values = stateValues(id);
+            values.put("elapsedSeconds", Math.max(0, seconds));
+            getWritableDatabase().insertWithOnConflict("state", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+        }
+
+        void setSelfReview(String id, String grade, String tags) {
+            ContentValues values = stateValues(id);
+            values.put("selfGrade", grade == null ? "" : grade);
+            values.put("selfTags", tags == null ? "" : tags);
+            getWritableDatabase().insertWithOnConflict("state", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+        }
+
         private ContentValues stateValues(String id) {
             ContentValues existing = existingStateValues(id);
             ContentValues values = new ContentValues();
@@ -1609,6 +1761,9 @@ public class MainActivity extends Activity {
             values.put("starred", existing.getAsInteger("starred"));
             values.put("memo", existing.getAsString("memo"));
             values.put("reviewCount", existing.getAsInteger("reviewCount"));
+            values.put("elapsedSeconds", existing.getAsInteger("elapsedSeconds"));
+            values.put("selfGrade", existing.getAsString("selfGrade"));
+            values.put("selfTags", existing.getAsString("selfTags"));
             String reviewedAt = existing.getAsString("reviewedAt");
             if (reviewedAt != null) {
                 values.put("reviewedAt", reviewedAt);
@@ -1626,7 +1781,10 @@ public class MainActivity extends Activity {
             values.put("starred", 0);
             values.put("memo", "");
             values.put("reviewCount", 0);
-            Cursor cursor = getReadableDatabase().rawQuery("SELECT status,starred,memo,reviewedAt,reviewCount,dueAt FROM state WHERE id=?", new String[]{id});
+            values.put("elapsedSeconds", 0);
+            values.put("selfGrade", "");
+            values.put("selfTags", "");
+            Cursor cursor = getReadableDatabase().rawQuery("SELECT status,starred,memo,reviewedAt,reviewCount,dueAt,elapsedSeconds,selfGrade,selfTags FROM state WHERE id=?", new String[]{id});
             try {
                 if (cursor.moveToFirst()) {
                     values.put("status", cursor.getString(0));
@@ -1639,6 +1797,9 @@ public class MainActivity extends Activity {
                     if (!cursor.isNull(5)) {
                         values.put("dueAt", cursor.getString(5));
                     }
+                    values.put("elapsedSeconds", cursor.isNull(6) ? 0 : cursor.getInt(6));
+                    values.put("selfGrade", cursor.isNull(7) ? "" : cursor.getString(7));
+                    values.put("selfTags", cursor.isNull(8) ? "" : cursor.getString(8));
                 }
             } finally {
                 cursor.close();
@@ -1649,7 +1810,7 @@ public class MainActivity extends Activity {
         JSONObject exportStateJson() throws Exception {
             JSONObject root = new JSONObject();
             JSONArray states = new JSONArray();
-            Cursor cursor = getReadableDatabase().rawQuery("SELECT id,status,starred,memo,reviewedAt,reviewCount,dueAt FROM state ORDER BY id", null);
+            Cursor cursor = getReadableDatabase().rawQuery("SELECT id,status,starred,memo,reviewedAt,reviewCount,dueAt,elapsedSeconds,selfGrade,selfTags FROM state ORDER BY id", null);
             try {
                 while (cursor.moveToNext()) {
                     JSONObject row = new JSONObject();
@@ -1664,6 +1825,9 @@ public class MainActivity extends Activity {
                     if (!cursor.isNull(6)) {
                         row.put("dueAt", cursor.getString(6));
                     }
+                    row.put("elapsedSeconds", cursor.isNull(7) ? 0 : cursor.getInt(7));
+                    row.put("selfGrade", cursor.isNull(8) ? "" : cursor.getString(8));
+                    row.put("selfTags", cursor.isNull(9) ? "" : cursor.getString(9));
                     states.put(row);
                 }
             } finally {
@@ -1711,6 +1875,9 @@ public class MainActivity extends Activity {
                     if (dueAt.length() > 0) {
                         values.put("dueAt", dueAt);
                     }
+                    values.put("elapsedSeconds", Math.max(0, row.optInt("elapsedSeconds", 0)));
+                    values.put("selfGrade", row.optString("selfGrade", ""));
+                    values.put("selfTags", row.optString("selfTags", ""));
                     database.insertWithOnConflict("state", null, values, SQLiteDatabase.CONFLICT_REPLACE);
                 }
                 database.setTransactionSuccessful();
@@ -1739,7 +1906,7 @@ public class MainActivity extends Activity {
 
         private List<Question> query(String where, String[] args, String order, int limit) {
             SQLiteDatabase database = getReadableDatabase();
-            String sql = "SELECT q.id,q.round,q.category,q.keyword,q.question,IFNULL(s.status,'unseen'),IFNULL(s.starred,0),IFNULL(s.memo,''),(SELECT COUNT(*) FROM questions k WHERE k.keyword=q.keyword),IFNULL(s.reviewedAt,''),IFNULL(s.reviewCount,0),IFNULL(s.dueAt,'') " +
+            String sql = "SELECT q.id,q.round,q.category,q.keyword,q.question,IFNULL(s.status,'unseen'),IFNULL(s.starred,0),IFNULL(s.memo,''),(SELECT COUNT(*) FROM questions k WHERE k.keyword=q.keyword),IFNULL(s.reviewedAt,''),IFNULL(s.reviewCount,0),IFNULL(s.dueAt,''),IFNULL(s.elapsedSeconds,0),IFNULL(s.selfGrade,''),IFNULL(s.selfTags,'') " +
                     "FROM questions q LEFT JOIN state s ON s.id=q.id WHERE " + where + " ORDER BY " + order + " LIMIT " + limit;
             Cursor cursor = database.rawQuery(sql, args);
             List<Question> rows = new ArrayList<>();
@@ -1765,6 +1932,9 @@ public class MainActivity extends Activity {
             q.reviewedAt = cursor.getString(9);
             q.reviewCount = cursor.getInt(10);
             q.dueAt = cursor.getString(11);
+            q.elapsedSeconds = cursor.getInt(12);
+            q.selfGrade = cursor.getString(13);
+            q.selfTags = cursor.getString(14);
             q.displayQuestion = cleanQuestion(q.question);
             return q;
         }
