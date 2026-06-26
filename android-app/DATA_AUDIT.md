@@ -6,6 +6,8 @@
 - Questions with references: 719
 - Questions with answer keywords: 930
 - Questions with summaries: 930
+- Basic concept questions: 667
+- Core basic concept questions: 140
 - Textbook exercises: 512
 - Textbook exercises needing review: 252
 - Questions with encoding/OCR review signals: 3

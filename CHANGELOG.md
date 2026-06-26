@@ -1,5 +1,11 @@
 # Changelog
 
+## 25.0
+
+- Added a dedicated basic-concept question queue.
+- Classified 667 concept-oriented questions and highlighted 140 core basic-concept questions.
+- Added subject filters and a core-only toggle for concept review.
+
 ## 24.0
 
 - Added a dedicated "오늘 약점 큐" screen for due, weak, starred, low-grade, slow, and tagged questions.

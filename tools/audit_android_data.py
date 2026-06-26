@@ -45,6 +45,7 @@ def main():
     keywords = load_json("answer-keywords.json").get("keywords", {})
     summaries = load_json("summary-points.json").get("summaries", {})
     exercises = load_json("textbook-exercises.json").get("exercises", [])
+    basic_concepts = load_json("basic-concept-questions.json").get("questions", [])
 
     keyword_counts = Counter(q.get("keyword", "") for q in questions)
     question_counts = Counter(q.get("question", "") for q in questions)
@@ -67,6 +68,8 @@ def main():
     report.append(f"- Questions with references: {len(references)}")
     report.append(f"- Questions with answer keywords: {len(keywords)}")
     report.append(f"- Questions with summaries: {len(summaries)}")
+    report.append(f"- Basic concept questions: {len(basic_concepts)}")
+    report.append(f"- Core basic concept questions: {sum(1 for row in basic_concepts if row.get('level') == 'core')}")
     report.append(f"- Textbook exercises: {len(exercises)}")
     report.append(f"- Textbook exercises needing review: {sum(1 for e in exercises if e.get('reviewNeeded'))}")
     report.append(f"- Questions with encoding/OCR review signals: {suspect_questions}")

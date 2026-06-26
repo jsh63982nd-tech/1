@@ -198,8 +198,11 @@ public class MainActivity extends Activity {
     private JSONObject summaryPointIndex = new JSONObject();
     private JSONObject ocrQualityReport = new JSONObject();
     private final List<TextbookExercise> textbookExercises = new ArrayList<>();
+    private final List<BasicConceptQuestion> basicConceptQuestions = new ArrayList<>();
     private String exerciseSubject = "전체";
     private String exerciseKind = "전체";
+    private String basicConceptSubject = "전체";
+    private boolean basicConceptCoreOnly = true;
     private boolean exerciseFormulaOnly = false;
     private boolean exerciseReviewOnly = false;
     private boolean exerciseHideReviewNeeded = true;
@@ -221,6 +224,7 @@ public class MainActivity extends Activity {
         loadSummaryPoints();
         loadOcrQualityReport();
         loadTextbookExercises();
+        loadBasicConceptQuestions();
         buildShell();
         showHome();
     }
@@ -285,6 +289,7 @@ public class MainActivity extends Activity {
 
         body.addView(section("바로 시작"));
         body.addView(actionButton("오늘 약점 큐", v -> showWeakQueue()));
+        body.addView(actionButton("기본개념 문제", v -> showBasicConceptQuestions()));
         body.addView(actionButton("미회독 시작", v -> {
             statusFilter = FILTER_UNSEEN;
             showQuestions();
@@ -320,6 +325,43 @@ public class MainActivity extends Activity {
         for (Question q : rows) {
             body.addView(recommendationButton(q, v -> showDetail(q.id)));
         }
+    }
+
+    private void showBasicConceptQuestions() {
+        LinearLayout body = paddedColumn();
+        screen.removeAllViews();
+        screen.addView(wrapScroll(body));
+
+        body.addView(section("기본개념 문제"));
+        body.addView(muted("정의·원리·특징·구성·목적·장단점 중심 문제를 추렸습니다. 기본은 핵심 기본개념만 표시합니다."));
+
+        LinearLayout subjects = row();
+        String[] filters = {"전체", "송배전공학", "계통공학", "발전공학"};
+        for (String filter : filters) {
+            subjects.addView(smallButton(selectedLabel(filter, filter.equals(basicConceptSubject)), v -> {
+                basicConceptSubject = ((Button) v).getText().toString().replace(" *", "");
+                showBasicConceptQuestions();
+            }));
+        }
+        body.addView(subjects);
+        body.addView(smallButton(selectedLabel("핵심만", basicConceptCoreOnly), v -> {
+            basicConceptCoreOnly = !basicConceptCoreOnly;
+            showBasicConceptQuestions();
+        }));
+
+        int total = 0;
+        int shown = 0;
+        for (BasicConceptQuestion row : basicConceptQuestions) {
+            if (!"전체".equals(basicConceptSubject) && !basicConceptSubject.equals(row.subject)) continue;
+            if (basicConceptCoreOnly && !"core".equals(row.level)) continue;
+            total++;
+            Question q = db.find(row.id);
+            if (q == null) continue;
+            body.addView(basicConceptButton(row, q));
+            shown++;
+            if (shown >= 180) break;
+        }
+        body.addView(muted(shown + "/" + total + "문제 표시 · 핵심 " + basicConceptCount("core") + "문제 · 전체 " + basicConceptQuestions.size() + "문제"));
     }
 
     private String homeStatusText(Stats stats) {
@@ -626,6 +668,9 @@ public class MainActivity extends Activity {
         body.addView(card("전체 " + stats.total + "\n미회독 " + stats.unseen + "\n완료 " + stats.done + "\n취약 " + stats.weak + "\n복습 예정/도래 " + stats.due + "\n별표 " + stats.starred));
         body.addView(section("과목 추정"));
         body.addView(card("송배전공학 " + db.subjectCount(SUBJECT_SONG) + "문제\n발전공학 " + db.subjectCount(SUBJECT_GEN) + "문제\n계통공학 " + db.subjectCount(SUBJECT_GRID) + "문제"));
+        body.addView(section("기본개념"));
+        body.addView(card("핵심 기본개념 " + basicConceptCount("core") + "문제\n전체 기본개념 후보 " + basicConceptQuestions.size() + "문제"));
+        body.addView(actionButton("기본개념 문제 보기", v -> showBasicConceptQuestions()));
         body.addView(section("교재 문제"));
         body.addView(card(textbookExercises.size() + "문제\n연습문제 " + textbookExerciseKindCount("exercise") + "문제\n예제 " + textbookExerciseKindCount("example") + "문제\n수식형 " + textbookExerciseFormulaCount() + "문제\n검수 필요 " + textbookExerciseReviewCount() + "문제"));
         body.addView(actionButton("OCR 검수 필요 목록", v -> {
@@ -829,6 +874,35 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void loadBasicConceptQuestions() {
+        basicConceptQuestions.clear();
+        try {
+            InputStream input = getAssets().open("basic-concept-questions.json");
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            input.close();
+            JSONArray rows = new JSONObject(out.toString("UTF-8")).optJSONArray("questions");
+            if (rows == null) return;
+            for (int i = 0; i < rows.length(); i++) {
+                JSONObject row = rows.optJSONObject(i);
+                if (row == null) continue;
+                BasicConceptQuestion item = new BasicConceptQuestion();
+                item.id = row.optString("id");
+                item.subject = row.optString("subject");
+                item.score = row.optInt("score");
+                item.level = row.optString("level", "standard");
+                item.reason = row.optString("reason");
+                basicConceptQuestions.add(item);
+            }
+        } catch (Exception ignored) {
+            basicConceptQuestions.clear();
+        }
+    }
+
     private TextbookExercise findTextbookExercise(String id) {
         for (TextbookExercise item : textbookExercises) {
             if (item.id.equals(id)) return item;
@@ -854,6 +928,23 @@ public class MainActivity extends Activity {
 
     private String exerciseKindLabel(String kind) {
         return "example".equals(kind) ? "예제" : "연습문제";
+    }
+
+    private int basicConceptCount(String level) {
+        int count = 0;
+        for (BasicConceptQuestion row : basicConceptQuestions) {
+            if (level.equals(row.level)) count++;
+        }
+        return count;
+    }
+
+    private Button basicConceptButton(BasicConceptQuestion row, Question q) {
+        String level = "core".equals(row.level) ? "핵심" : "일반";
+        String label = q.round + " · " + row.subject + " · " + level + " · " + row.score + "점\n" +
+                q.keyword + "\n" + cleanQuestion(q.question) + "\n선정 이유: " + row.reason;
+        Button button = actionButton(label, v -> showDetail(q.id));
+        button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        return button;
     }
 
     private int textbookExerciseReviewCount() {
@@ -1572,6 +1663,14 @@ public class MainActivity extends Activity {
         String question;
         boolean formula;
         boolean reviewNeeded;
+    }
+
+    private static class BasicConceptQuestion {
+        String id;
+        String subject;
+        int score;
+        String level;
+        String reason;
     }
 
     private static class Stats {
