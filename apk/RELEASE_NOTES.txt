@@ -1,8 +1,8 @@
 기출 회독 Android APK
 
-- Commit: 889890a971e23c806b5c9c8dbcb5492050ee733a
-- Build: 24
+- Commit: 739be89749ea840b6094a88cf39fa9677726a4c2
+- Build: 25
 - Debug APK: apk/power-exam-review-debug.apk
 - Release APK: apk/power-exam-review-release.apk
 
-- 889890a Add Android weak review queue
+- 739be89 Add basic concept question queue
